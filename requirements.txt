@@ -1,0 +1,4 @@
+openai
+plotly
+transforms3d
+open3d
