@@ -10,79 +10,29 @@ from omni.isaac.kit import SimulationApp
 #from omni.isaac.occupancy_map import _occupancy_map
 #import omni.isaac.core.utils.prims as prims_utils
 
-class PrimClass():
-    def __init__(self, PrimMesh=None):
-        self.set_mesh(PrimMesh)
-        if PrimMesh:
-            assert PrimMesh.IsValid() and PrimMesh.HasProperty('extent')
-            self.calculate_attributes()
-            self.calculate_position()
-
-    def set_mesh(self, PrimMesh=None):
-        self.mesh = PrimMesh
-        self.isComplete = False
-
-    def calculate_attributes(self):
-        # Get the basic information
-        self.name = self.mesh.GetName()
-        self.path = self.mesh.GetPath().pathString
-        # Get the categories
-
-    def calculate_position(self):
-        # Get its parent Xform of this mesh
-        self.parent = self.mesh.GetParent()
-        # Get the translate of its parent
-        parent_path = self.parent.GetPath().pathString
-        # print("prim name: ", cp_path) # Show full name
-        import omni.isaac.core.utils.prims as prims_utils
-        translation = prims_utils.get_prim_attribute_value(parent_path, attribute_name="xformOp:translate")
-        
-        # Get its outline, extent values 
-        extent_attr = self.mesh.GetAttribute('extent')
-        bbox = extent_attr.Get()
-        print("The bounding box: ", bbox)
-        # extent_attr may be None !
-        if bbox:
-            assert len(bbox) == 2
-            self.bbox_min,self.bbox_max = bbox
-            # Calculate the size
-            self.size = self.bbox_max - self.bbox_min
-            # Calculate the center
-            local_center = list((self.bbox_max + self.bbox_min)/2)
-            
-            # calculate the position
-            self.position = translation + local_center
-            self.isComplete = True
-        else:
-            self.isComplete = False
-
-    def show(self):
-        print(f"The mesh path of Xform prim: {self.path}")
-        print(f"The size of prim: {self.size}")
-        print(f"The bounding box of prim: {self.bbox_min}, {self.bbox_max}")
-        print(f"The position of prim: {self.position}")
+sys.path.append('..')
+from utils.task_util import to_world, point_to_plane_distance, print_prim_and_grid, is_masked
+from envs.prim_class import PrimClass
 
 class QuadrotorIsaacSim():
     """
     Initializes the QuadrotorIsaacSim environment.
-
     Args:
         visualizer: interface, optional.
-
     Attributes:
         _prev_arm_action (numpy.ndarray): Stores the previous arm action.
     """
     def __init__(self, config, usd_path=None):
-        # Simple example showing how to start and stop the helper
-        self.App = SimulationApp(launch_config=config)
+        # 
+        self.App = SimulationApp(launch_config=config['app'])
         self.load_task(usd_path)
         time.sleep(2)
+        self.init_config(config['grid_resolution'])
 
     def load_task(self, usd_path=None):
         """
         Loads a new task into the environment and resets task-related variables.
         Records the mask IDs of the robot, gripper, and objects in the scene.
-
         Args:
             usd_path (str): Path of the task object or the environment USD.
         """
@@ -114,6 +64,39 @@ class QuadrotorIsaacSim():
             self.App.update()
         print("Loading Complete")
     
+    def init_config(self, gr):
+        self.masked_prims = ['Looks','Meshes','Lighting','Road','Buildings','Pavement',
+                        'GroundPlane','TrafficLight','Bench','Tree','TableChair',
+                        'Billboard','Lamp','RoadBarriers','Booth','Umbrella','Camera']
+        # for grid map
+        stage = omni.usd.get_context().get_stage()
+        self.length_unit = stage.GetMetadata('metersPerUnit')
+        self.grid_resolution = gr / self.length_unit # number is in meter; less than 1.0 and can divide 1.0
+
+        # Initiate the interface to access convex mesh data
+        from omni.physx import get_physx_cooking_interface, get_physx_interface
+        get_physx_interface().force_load_physics_from_usd()
+        self.cooking_interface = get_physx_cooking_interface()
+
+    def init_timer(self, dt=0.1):
+        from omni.isaac.core import SimulationContext
+        self.simulation_context = SimulationContext()
+        self.timestep_threshold = dt
+        self.previous_simulation_time = self.simulation_context.current_time
+
+    def get_timestep(self):
+        current_simulation_time = self.simulation_context.current_time
+        timestep = current_simulation_time - self.previous_simulation_time
+
+        if timestep >= self.timestep_threshold:
+            self.previous_simulation_time = current_simulation_time
+            return timestep
+        
+        return 0
+
+    def get_simulation_time(self):
+        return self.simulation_context.current_time
+
     def stop_task(self):
         self.App.close()  # Cleanup application
         sys.exit()
@@ -124,207 +107,127 @@ class QuadrotorIsaacSim():
     def is_running(self):
         return self.App._app.is_running() and not self.App.is_exiting()
 
-    def get_all_prim_names(self):
+    def is_collided_with_prim(self, prim, point, threshold=None):
         """
-        Returns the names of all objects in the current task environment.
-
-        Returns:
-            list: A list of object names.
+        Judge whether the point collides with the prim
+        Args: 
+            threshold: it is a collision, only when the point-prim distance < the threshold
+        Returns the flag: whether point collides with the prim
         """
-        import omni.isaac.core.utils.prims as prims_utils
-        # Get all prims
-        predicate = lambda path: True
-        child_prims = prims_utils.get_all_matching_child_prims("/", predicate)
-        # print("child_prim: ", child_prims)
-        # show the attributes of each child prim
-        # print("prim attributes: ", dir(child_prims[7]))
+        from pxr import UsdGeom, Usd, Gf
 
-        # Store child prims in dictionary
-        primname_dict = {}
-        for prim in child_prims:
-            # Ignore the prims with '/Looks/' and single '/'
-            #if '/Looks/' not in cp_path and cp_path.count('/') > 1:
-            #    primname_dict[cp_path] = prim_position
-
-            # store the prims with extent outlines
-            if prim.IsValid() and prim.HasProperty('extent'):
-                print("In prim:  ", prim)
-                prim_element = PrimClass(prim)
-                #prim_element.show()
-                prim_name = prim_element.name
-                if prim_element.isComplete:
-                    primname_dict[prim_name] = prim_element
-            else:
-                continue
-                print("Prim has NO extent property! Not stored!")
-        print("All prim dictionary: ", primname_dict)
-
-        return primname_dict
-    
-    def to_world(self, vertex, transform_matrix):
-        # 将局部坐标转为世界坐标
-        vertex_homogeneous = np.append(vertex, 1)  # 将顶点变为齐次坐标形式
-        return np.dot(transform_matrix, vertex_homogeneous)[:3]
-    
-    def is_point_in_polygon(self, point_proj, poly_world_vertex):
-        # number of vertices
-        num_vertices = len(poly_world_vertex)
-
-        angle_sum = 0.0
-
-        for i in range(num_vertices):
-            v1 = poly_world_vertex[i] - point_proj
-            v2 = poly_world_vertex[(i + 1) % num_vertices] - point_proj
-
-            v1_norm = np.linalg.norm(v1)
-            v2_norm = np.linalg.norm(v2)
-            dot_product = np.dot(v1, v2)
-            angle = np.arccos(dot_product / (v1_norm * v2_norm))
-            angle_sum += angle
-
-        return np.isclose(angle_sum, 2 * np.pi)
-    
-    def point_to_plane_distance(self, point, poly_world_vertex):
-        """
-        calculate the distance from point to plane
-        point: numpy array, include the coordinate (x, y, z)
-        poly_world_vertex: contain numpy array, all vertices of the plane
-        """
-        p0, p1, p2 = poly_world_vertex[0], poly_world_vertex[1], poly_world_vertex[2]
-
-        # get two vectors
-        vec1 = p1 - p0
-        vec2 = p2 - p0
-        # Calculate the plane normal vector (cross product of vec1 and vec2)
-        normal = np.cross(vec1, vec2)
-        normal = normal / np.linalg.norm(normal)
-        
-        # calculate the D in plane Ax + By + Cz + D = 0
-        D = -np.dot(normal, p0)
-        
-        # calculate the distance from point to plane
-        distance = np.abs(np.dot(normal, point) + D) / np.linalg.norm(normal)
-
-        # get the normal projection
-        point_proj = point - (np.dot(normal, point) + D) * normal
-        
-        is_inside = self.is_point_in_polygon(point_proj, poly_world_vertex)
-
-        return distance, is_inside
-
-    def get_collision_prim(self, prim, point):
-        """
-        Judge whether point inside the prim
-        return two flags
-        1st flag: whether the prim has convex hull
-        2nd flag: whether point inside the prim
-        """
-        from omni.physx import get_physx_cooking_interface, get_physx_interface
-        from pxr import UsdGeom, Usd
-        
-        get_physx_interface().force_load_physics_from_usd()
-        
-        cooking_interface = get_physx_cooking_interface()
-
+        transform_matrix = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         prim_path = str(prim.GetPath())
         # print("prim_path: ", prim_path)
-        transform_matrix = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-        position = transform_matrix.ExtractTranslation()
-        print("position: ", position)
-        num_convex_hulls = cooking_interface.get_nb_convex_mesh_data(prim_path)
+        num_convex_hulls = self.cooking_interface.get_nb_convex_mesh_data(prim_path)
         
         if num_convex_hulls == 0:
-            return False, False
+            return False
 
-        distances_flags = []
+        if threshold is None: # set the deault value
+            threshold = 1e-4 / self.length_unit
+
+        # distances_flags = []
         for hull_index in range(num_convex_hulls):
-            convex_hull_data = cooking_interface.get_convex_mesh_data(prim_path, hull_index)
+            convex_hull_data = self.cooking_interface.get_convex_mesh_data(prim_path, hull_index)
             # get vertices & polygons
             vertices = convex_hull_data["vertices"]
             polygons = convex_hull_data["polygons"]
             
+            # For each polygon of hull
             for poly_index in range(convex_hull_data["num_polygons"]):
                 index_base = polygons[poly_index]["index_base"]
-                # print("poly_index: ", poly_index)
                 
+                # collect all vertices of polygon
                 poly_world_vertex = []
                 for vertex_index in range(polygons[poly_index]["num_vertices"]):
                     current_index = convex_hull_data["indices"][index_base + vertex_index]
-                    poly_world_vertex.append(self.to_world(vertices[current_index], transform_matrix))
-                # if "wall_side" in prim_path:
-                #     print("prim_path: ", prim_path)
-                #     print("poly_world_vertex: ", poly_world_vertex)
-                    
-                distance, is_inside_poly = self.point_to_plane_distance(point, poly_world_vertex)
-                if is_inside_poly:
-                    return True, True
-                distances_flags.append((distance,is_inside_poly))
+                    # poly_world_vertex.append(to_world(vertices[current_index], transform_matrix))
+                    vert =  np.fromiter(vertices[current_index], dtype=np.float64)
+                    vertex_world = transform_matrix.Transform(Gf.Vec3d(vert[0],vert[1],vert[2]))
+                    poly_world_vertex.append(vertex_world)
+                # print("poly_world_vertex: ", poly_world_vertex)
+                distance, is_inside_poly = point_to_plane_distance(point, poly_world_vertex)
+                if distance<=threshold and is_inside_poly:
+                    return True
+                # distances_flags.append((distance,is_inside_poly))
                 
-        # print("distances_flags: ", distances_flags)
-        min_distance, inside_poly = min(distances_flags, key=lambda x: x[0])
+        # min_distance, inside_poly = min(distances_flags, key=lambda x: x[0])
         # print("min_distance: ", min_distance, "inside_poly?: ", inside_poly)
-
-        return True, inside_poly
+        return False
     
     def get_bounding_box(self, prim):
-        """ return min and max coordinates of bounding box """
-        from pxr import UsdGeom, Usd
+        """ return min and max coordinates of bounding box in centimeter unit"""
+        from pxr import UsdGeom, Usd, Gf
+        # Get BBoxCache, and calculate bounding box in local frame
         bbox = UsdGeom.BBoxCache(Usd.TimeCode.Default(), includedPurposes=[UsdGeom.Tokens.default_])
         box = bbox.ComputeWorldBound(prim).GetRange()
-        return box.GetMin() / 100.0, box.GetMax() / 100.0
 
-    def is_masked_prim(self, prim_path):
-        masked_prims = ['Looks','Meshes','Lighting','Road','Buildings','Pavement',
-                        'GroundPlane','TrafficLight','Bench','Tree','TableChair',
-                        'Billboard','Lamp','RoadBarriers','Booth','Umbrella','Camera']
-        
-        for masked in masked_prims:
-            if masked in prim_path:
-                return True
-        return False
+        # Get the local to world transform
+        xformable = UsdGeom.Xformable(prim)
+        transform_matrix = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        self.prim_position = transform_matrix.ExtractTranslation()
+
+        # Get min and max bounding box 
+        min_bbox_local = box.GetMin()
+        max_bbox_local = box.GetMax()
+
+        # To world frame
+        min_bbox_world = transform_matrix.Transform(Gf.Vec3d(min_bbox_local))  # in centimeter unit
+        max_bbox_world = transform_matrix.Transform(Gf.Vec3d(max_bbox_local)) 
+
+        # To world frame
+        min_bbox = Gf.Vec3d(
+            min(min_bbox_world[0], max_bbox_world[0]),
+            min(min_bbox_world[1], max_bbox_world[1]),
+            min(min_bbox_world[2], max_bbox_world[2])
+        )
+        max_bbox = Gf.Vec3d(
+            max(min_bbox_world[0], max_bbox_world[0]),
+            max(min_bbox_world[1], max_bbox_world[1]),
+            max(min_bbox_world[2], max_bbox_world[2])
+        )
+        return min_bbox, max_bbox
 
     def save_all_prims_in_grid(self):
-        from pxr import Gf
+        # from pxr import Gf
         # get current stage
         stage = omni.usd.get_context().get_stage()
 
-        self.grid_resolution = 1.0 # less than 1.0 and can divide 1.0
         gr = self.grid_resolution
-        
         self.prim_grid = {}
         
         # get all prims from the stage
         for prim in stage.Traverse():
             prim_path = str(prim.GetPath())
             # check whether prim_path is masked
-            if self.is_masked_prim(prim_path):
+            if is_masked(prim_path, self.masked_prims):
                 continue
 
-            print("Prim: ", prim)
-            min_bbox, max_bbox = self.get_bounding_box(prim)
-            print("bounding_box: ", min_bbox, max_bbox)
-            
-            is_convex_hull, _ = self.get_collision_prim(prim, np.array(min_bbox))
-            print("is_convex_hull: ", is_convex_hull)
-            if is_convex_hull:
+            num_convex_hulls = self.cooking_interface.get_nb_convex_mesh_data(prim_path)
+
+            if num_convex_hulls > 0:
+                min_bbox, max_bbox = self.get_bounding_box(prim)
                 x_range = np.arange(math.floor(min_bbox[0] / gr) * gr, math.ceil(max_bbox[0] / gr) * gr + gr, gr).tolist()
                 y_range = np.arange(math.floor(min_bbox[1] / gr) * gr, math.ceil(max_bbox[1] / gr) * gr + gr, gr).tolist()
                 z_range = np.arange(math.floor(min_bbox[2] / gr) * gr, math.ceil(max_bbox[2] / gr) * gr + gr, gr).tolist()
-
+                
                 for x in x_range:
                     for y in y_range:
                         for z in z_range:
-                            point = np.array([x, y, z])
-                            _, inside_poly = self.get_collision_prim(prim, point)
-                            if inside_poly:
+                            # print("Checking point: ", np.array([x, y, z]))                   
+                            if self.is_collided_with_prim(prim, np.array([x, y, z]), gr/2):
                                 point_key = (x, y, z)
                                 if point_key not in self.prim_grid:
                                     self.prim_grid[point_key] = prim
-        # print("prim_grid: ", self.prim_grid)
-        self.show_grid_by_prim(self.prim_grid)
+                # print("Prim: ", prim)
+                # print("Prim position: ", self.prim_position)
+                # print("Min bounding_box: ", min_bbox)
+                # print("Max bounding_box: ", max_bbox)
+        print_prim_and_grid(self.prim_grid)
         return self.prim_grid
 
-    def get_prim_from_position(self, point):
+    def detect_prim_from_position(self, point):
         gr = self.grid_resolution
         grid_coord = (
             round(point[0] / gr) * gr,
@@ -334,7 +237,6 @@ class QuadrotorIsaacSim():
         # print("grid_coord: ", grid_coord)
         if grid_coord in self.prim_grid:
             return self.prim_grid[grid_coord]  # 返回对应的 prim
-
         return None
 
     def show_grid_by_prim(self, prim_grid):

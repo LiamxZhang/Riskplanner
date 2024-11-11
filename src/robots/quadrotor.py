@@ -59,8 +59,7 @@ class Quadrotor(Robot):
             self._usd_path = assets_root_path + "/Isaac/Robots/Crazyflie/cf2x.usd"
 
         add_reference_to_stage(self._usd_path, prim_path)
-        # scale = torch.tensor([5, 5, 5])
-        scale = torch.tensor([5, 5, 5]) 
+        scale = torch.tensor([5, 5, 5])
         
         super().__init__(prim_path=prim_path, name=name, translation=translation, orientation=orientation, scale=scale)
 

@@ -175,14 +175,14 @@ class RotatingLidar():
         self._current_frame["time"] = self.current_time
         self._current_frame["point_cloud"] = self.depth_points
 
-        if self.visualization:
+        # if False:
             # print("current_frame intensity: ", self._current_frame["intensity"])
             # print("current_frame depth: ", self._current_frame["depth"])
             # print("current_frame physics_step: ", self._current_frame["physics_step"])
             # print("current_frame time: ", self._current_frame["time"])
             # print("current_frame LiDar data: ", self.depth_points[:5])
             # print("current_frame LiDar data shape: ", self.depth_points.shape)
-            print("LiDar semantics: ", self.semantics[:5])
+            # print("LiDar semantics: ", self.semantics[:5])
         return
 
     def check_config(self):
