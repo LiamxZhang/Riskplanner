@@ -50,7 +50,7 @@ while QIS.is_running():
     # Control part
     time_step = QIS.get_timestep()
     if time_step:
-        print("current simulation time: ", QIS.get_simulation_time())
+        print("current simulation time: ", QIS.time())
         quadrotor.control_update(time_step, [[0.25,0.0,10.0,90.0]])
         # quadrotor.nlcontroller.force_and_torques_to_thrust(pid_cmd[0],pid_cmd[1:4])
         breakpoint()
@@ -60,4 +60,4 @@ while QIS.is_running():
     QIS.update()
     
 timeline.stop()
-QIS.stop_task()
+QIS.stop()

@@ -1,18 +1,20 @@
 # This script includes the utility functions for the Riskplanner project
 #
 #
-import numpy as np
+import torch
+
 
 def to_world(vertex, transform_matrix):
     """
     Convert vertex in local coordinates to world coordinates
     vertex: list, a vertex of the plane include the coordinate (x, y, z)
-    transform_matrix: numpy array 4*4 
+    transform_matrix: torch tensor 4*4 
     """
-    import numpy as np
+    # Transform vertex into homogeneous coordinate form
+    vertex_homogeneous = torch.cat((vertex, torch.tensor([1.0]))) 
 
-    vertex_homogeneous = np.append(vertex, 1)  # 将顶点变为齐次坐标形式
-    return np.dot(transform_matrix, vertex_homogeneous)[:3]
+    # Perform matrix multiplication and return the first 3 elements
+    return torch.matmul(transform_matrix, vertex_homogeneous)[:3]
 
 def is_masked(prim_path, masked_prims):
         # masked_prims = ['Looks','Meshes','Lighting','Road','Buildings','Pavement',
@@ -24,13 +26,14 @@ def is_masked(prim_path, masked_prims):
                 return True
         return False
 
+
 def is_point_in_polygon(point, poly_world_vertex):
     """
     Check whether the 3D point is within the polygon 
     point: 1*3 list, include the coordinate (x, y, z)
-    poly_world_vertex: vertices of polygen in world coordinate
+    poly_world_vertex (list): vertices of polygen in world coordinate
     """
-    # number of vertices
+    # Number of vertices
     num_vertices = len(poly_world_vertex)
 
     angle_sum = 0.0
@@ -39,37 +42,38 @@ def is_point_in_polygon(point, poly_world_vertex):
         v1 = poly_world_vertex[i] - point
         v2 = poly_world_vertex[(i + 1) % num_vertices] - point
 
-        v1_norm = np.linalg.norm(v1)
-        v2_norm = np.linalg.norm(v2)
-        dot_product = np.dot(v1, v2)
-        angle = np.arccos(dot_product / (v1_norm * v2_norm))
+        v1_norm = torch.norm(v1)
+        v2_norm = torch.norm(v2)
+        dot_product = torch.dot(v1, v2)
+        angle = torch.acos(dot_product / (v1_norm * v2_norm))
         angle_sum += angle
 
-    return np.isclose(angle_sum, 2 * np.pi)
+    return torch.isclose(angle_sum, torch.tensor(2 * torch.pi, dtype=torch.float64))
 
 def point_to_plane_distance(point, poly_world_vertex):
     """
-    calculate the distance from point to plane
-    point: numpy array, include the coordinate (x, y, z)
-    poly_world_vertex: contain numpy array, all vertices of the plane
+    Calculate the distance from point to plane
+    point: torch tensor, include the coordinate (x, y, z)
+    poly_world_vertex: contain torch tensor, all vertices of the plane
     """
     p0, p1, p2 = poly_world_vertex[0], poly_world_vertex[1], poly_world_vertex[2]
 
-    # get two vectors
+    # Get two vectors
     vec1 = p1 - p0
     vec2 = p2 - p0
-    # Calculate the plane normal vector (cross product of vec1 and vec2)
-    normal = np.cross(vec1, vec2)
-    normal = normal / np.linalg.norm(normal)
-    
-    # calculate the D in plane Ax + By + Cz + D = 0
-    D = -np.dot(normal, p0)
-    
-    # calculate the distance from point to plane
-    distance = np.abs(np.dot(normal, point) + D) / np.linalg.norm(normal)
 
-    # get the normal projection
-    point_proj = point - (np.dot(normal, point) + D) * normal
+    # Calculate the plane normal vector (cross product of vec1 and vec2)
+    normal = torch.cross(vec1, vec2)
+    normal = normal / torch.norm(normal)
+    
+    # Calculate the D in plane Ax + By + Cz + D = 0
+    D = -torch.dot(normal, p0)
+    
+    # Calculate the distance from point to plane
+    distance = torch.abs(torch.dot(normal, point) + D) / torch.norm(normal)
+
+    # Get the normal projection
+    point_proj = point - (torch.dot(normal, point) + D) * normal
     
     is_inside = is_point_in_polygon(point_proj, poly_world_vertex)
 

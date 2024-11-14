@@ -1,33 +1,98 @@
 # This script setup the isaac sim environment
 #
-import os
 import sys
 import math
 import time
+import carb
 import numpy as np
+from threading import Lock
+import torch
+
 import omni
 from omni.isaac.kit import SimulationApp
+
 #from omni.isaac.occupancy_map import _occupancy_map
 #import omni.isaac.core.utils.prims as prims_utils
 
 sys.path.append('..')
-from utils.task_util import to_world, point_to_plane_distance, print_prim_and_grid, is_masked
-from envs.prim_class import PrimClass
+from utils.task_util import point_to_plane_distance, print_prim_and_grid, is_masked
+from configs.configs import APP_SETTINGS, MAP_ASSET, WORLD_SETTINGS, CONTROL_PARAMS
 
-class QuadrotorIsaacSim():
+class QuadrotorIsaacSim:
     """
-    Initializes the QuadrotorIsaacSim environment.
-    Args:
-        visualizer: interface, optional.
-    Attributes:
-        _prev_arm_action (numpy.ndarray): Stores the previous arm action.
+    QuadrotorIsaacSim is a singleton class (there is only one object instance at any given time) that will be used to 
     """
-    def __init__(self, config, usd_path=None):
-        # 
-        self.App = SimulationApp(launch_config=config['app'])
+
+    # The object instance
+    _instance = None
+    _is_initialized = False
+
+    # Lock for safe multi-threading
+    _lock: Lock = Lock()
+
+    def __init__(self, usd_path: str = None):
+        """
+        Initialize the QuadrotorIsaacSim environment.
+        Args:
+            config: configuration parameters.
+        """
+        # If we already have an instance of the PegasusInterface, do not overwrite it!
+        if QuadrotorIsaacSim._is_initialized:
+            return
+
+        QuadrotorIsaacSim._is_initialized = True
+        
+        # Create the app
+        self.App = SimulationApp(launch_config=APP_SETTINGS)
         self.load_task(usd_path)
         time.sleep(2)
-        self.init_config(config['grid_resolution'])
+        self.init_config(CONTROL_PARAMS['grid_resolution'],CONTROL_PARAMS['control_cycle'])
+
+        # Access the world
+        from omni.isaac.core.world import World
+        self._world = World(**WORLD_SETTINGS)
+
+    """
+    Properties
+    """
+
+    @property
+    def world(self):
+        """The current omni.isaac.core.world World instance
+
+        Returns:
+            omni.isaac.core.world: The world instance
+        """
+        return self._world
+
+    @property
+    def time(self):
+        """The current omni.isaac.core SimulationContext time 
+
+        Returns:
+            SimulationContext.time : The current_time value
+        """
+        return self.simulation_context.current_time
+
+    """
+    Operations
+    """
+
+    def start(self):
+        self._world.reset()
+        
+        self.save_all_prims_in_grid()
+        self.init_timer()
+
+    def stop(self):
+        self.App.close()  # Cleanup application
+        sys.exit()
+
+    def update(self):
+        self.App.update()
+
+    def is_running(self):
+        return self.App.is_running() and not self.App.is_exiting()
 
     def load_task(self, usd_path=None):
         """
@@ -36,7 +101,6 @@ class QuadrotorIsaacSim():
         Args:
             usd_path (str): Path of the task object or the environment USD.
         """
-        import carb
         from omni.isaac.core.utils.nucleus import get_assets_root_path, is_file
         assets_root_path = get_assets_root_path()
         if assets_root_path is None:
@@ -44,7 +108,7 @@ class QuadrotorIsaacSim():
             self.stop_task()
         # Set task directory
         if not usd_path: 
-            usd_path = assets_root_path + "/Isaac/Environments/Simple_Room/simple_room.usd"
+            usd_path = assets_root_path + MAP_ASSET["default_usd_path"]
 
         # Load the stage
         if is_file(usd_path):
@@ -64,13 +128,19 @@ class QuadrotorIsaacSim():
             self.App.update()
         print("Loading Complete")
     
-    def init_config(self, gr):
+    def init_config(self, gr, dt=0.06):
+        """
+        Initialize the grid map resolution parameters and also the interface to access the convex meshes.
+        Args:
+            gr (float): grid resolution. 
+            dt (float): time step during each simulation cycle. 
+        """
         self.masked_prims = ['Looks','Meshes','Lighting','Road','Buildings','Pavement',
                         'GroundPlane','TrafficLight','Bench','Tree','TableChair',
                         'Billboard','Lamp','RoadBarriers','Booth','Umbrella','Camera']
         # for grid map
-        stage = omni.usd.get_context().get_stage()
-        self.length_unit = stage.GetMetadata('metersPerUnit')
+        self.stage = omni.usd.get_context().get_stage()
+        self.length_unit = self.stage.GetMetadata('metersPerUnit')
         self.grid_resolution = gr / self.length_unit # number is in meter; less than 1.0 and can divide 1.0
 
         # Initiate the interface to access convex mesh data
@@ -78,13 +148,21 @@ class QuadrotorIsaacSim():
         get_physx_interface().force_load_physics_from_usd()
         self.cooking_interface = get_physx_cooking_interface()
 
-    def init_timer(self, dt=0.1):
+        # Initiate the timer parameters
+        self.timestep_threshold = dt
+        self.previous_simulation_time = 0.0
+        
+    def init_timer(self):
         from omni.isaac.core import SimulationContext
         self.simulation_context = SimulationContext()
-        self.timestep_threshold = dt
         self.previous_simulation_time = self.simulation_context.current_time
 
     def get_timestep(self):
+        """
+        The actual simulation time step, according to user-defined time step (self.timestep_threshold) in init_config.
+        Returns:
+            timestep (float): actual time step. 
+        """
         current_simulation_time = self.simulation_context.current_time
         timestep = current_simulation_time - self.previous_simulation_time
 
@@ -93,19 +171,6 @@ class QuadrotorIsaacSim():
             return timestep
         
         return 0
-
-    def get_simulation_time(self):
-        return self.simulation_context.current_time
-
-    def stop_task(self):
-        self.App.close()  # Cleanup application
-        sys.exit()
-
-    def update(self):
-        self.App.update()
-
-    def is_running(self):
-        return self.App._app.is_running() and not self.App.is_exiting()
 
     def is_collided_with_prim(self, prim, point, threshold=None):
         """
@@ -137,15 +202,18 @@ class QuadrotorIsaacSim():
             # For each polygon of hull
             for poly_index in range(convex_hull_data["num_polygons"]):
                 index_base = polygons[poly_index]["index_base"]
-                
-                # collect all vertices of polygon
                 poly_world_vertex = []
+
+                # collect all vertices of polygon
                 for vertex_index in range(polygons[poly_index]["num_vertices"]):
                     current_index = convex_hull_data["indices"][index_base + vertex_index]
-                    # poly_world_vertex.append(to_world(vertices[current_index], transform_matrix))
-                    vert =  np.fromiter(vertices[current_index], dtype=np.float64)
-                    vertex_world = transform_matrix.Transform(Gf.Vec3d(vert[0],vert[1],vert[2]))
-                    poly_world_vertex.append(vertex_world)
+                    # vert =  np.fromiter(vertices[current_index], dtype=np.float64)
+                    vert = torch.tensor(vertices[current_index], dtype=torch.float64)
+                    # vertex_world = transform_matrix.Transform(Gf.Vec3d(vert[0],vert[1],vert[2]))
+                    vertex_world = transform_matrix.Transform(Gf.Vec3d(vert[0].item(), vert[1].item(), vert[2].item()))
+                    # poly_world_vertex.append(vertex_world)
+                    poly_world_vertex.append(torch.tensor([vertex_world[0], vertex_world[1], vertex_world[2]], dtype=torch.float64))
+
                 # print("poly_world_vertex: ", poly_world_vertex)
                 distance, is_inside_poly = point_to_plane_distance(point, poly_world_vertex)
                 if distance<=threshold and is_inside_poly:
@@ -190,15 +258,20 @@ class QuadrotorIsaacSim():
         return min_bbox, max_bbox
 
     def save_all_prims_in_grid(self):
+        """
+        Create a dictionary to save all prims in corresponding grids in the map.
+        The dictionary key is map grid, and the value is the prim.
+        Returns:
+            self.prim_grid (dict): all prims in grid. 
+        """
         # from pxr import Gf
-        # get current stage
-        stage = omni.usd.get_context().get_stage()
+        # stage = omni.usd.get_context().get_stage()
 
         gr = self.grid_resolution
         self.prim_grid = {}
         
         # get all prims from the stage
-        for prim in stage.Traverse():
+        for prim in self.stage.Traverse():
             prim_path = str(prim.GetPath())
             # check whether prim_path is masked
             if is_masked(prim_path, self.masked_prims):
@@ -208,15 +281,15 @@ class QuadrotorIsaacSim():
 
             if num_convex_hulls > 0:
                 min_bbox, max_bbox = self.get_bounding_box(prim)
-                x_range = np.arange(math.floor(min_bbox[0] / gr) * gr, math.ceil(max_bbox[0] / gr) * gr + gr, gr).tolist()
-                y_range = np.arange(math.floor(min_bbox[1] / gr) * gr, math.ceil(max_bbox[1] / gr) * gr + gr, gr).tolist()
-                z_range = np.arange(math.floor(min_bbox[2] / gr) * gr, math.ceil(max_bbox[2] / gr) * gr + gr, gr).tolist()
+                x_range = torch.arange(math.floor(min_bbox[0] / gr) * gr, math.ceil(max_bbox[0] / gr) * gr + gr, gr).tolist()
+                y_range = torch.arange(math.floor(min_bbox[1] / gr) * gr, math.ceil(max_bbox[1] / gr) * gr + gr, gr).tolist()
+                z_range = torch.arange(math.floor(min_bbox[2] / gr) * gr, math.ceil(max_bbox[2] / gr) * gr + gr, gr).tolist()
                 
                 for x in x_range:
                     for y in y_range:
                         for z in z_range:
-                            # print("Checking point: ", np.array([x, y, z]))                   
-                            if self.is_collided_with_prim(prim, np.array([x, y, z]), gr/2):
+                            point = torch.tensor([x, y, z], dtype=torch.float64)
+                            if self.is_collided_with_prim(prim, point, gr/2):
                                 point_key = (x, y, z)
                                 if point_key not in self.prim_grid:
                                     self.prim_grid[point_key] = prim
@@ -253,35 +326,40 @@ class QuadrotorIsaacSim():
             print(f"Prim: {prim}")
             print("Grid centers: ", grid_centers)
             
-    def get_scene_3d_obs(self, ignore_robot=False, ignore_grasped_obj=False):
-        """
-        Retrieves the entire scene's 3D point cloud observations and colors.
 
-        Args:
-            ignore_robot (bool): Whether to ignore points corresponding to the robot.
-            ignore_grasped_obj (bool): Whether to ignore points corresponding to grasped objects.
+    def __new__(cls):
+        """Allocates the memory and creates the actual QuadrotorIsaacSim object is not instance exists yet. Otherwise,
+        returns the existing instance of the QuadrotorIsaacSim class.
 
         Returns:
-            tuple: A tuple containing scene points and colors.
+            cls: the single instance of the QuadrotorIsaacSim class
         """
-        pass
 
-    def get_3d_obs_by_name(self, query_name):
-        """
-        Retrieves 3D point cloud observations and normals of an object by its name.
+        # Use a lock in here to make sure we do not have a race condition
+        # when using multi-threading and creating the first instance of the QuadrotorIsaacSim
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(QuadrotorIsaacSim, cls).__new__(cls)
 
-        Args:
-            query_name (str): The name of the object to query.
+        return cls._instance
 
-        Returns:
-            tuple: A tuple containing object points and object normals.
-        """
-        pass
+    def __del__(self):
+        """Destructor for the object. Destroys the only existing instance of this class."""
+        QuadrotorIsaacSim._instance = None
+        QuadrotorIsaacSim._is_initialized = False
 
 if __name__ == "__main__":
-    CONFIG = {"width": 1280, "height": 720, "sync_loads": True, "headless": False, "renderer": "RayTracedLighting"}
-    QIS = QuadrotorIsaacSim(CONFIG, task_name=None)
-    for i in range(100):
-        QIS.get_all_prim_names()
-        time.sleep(3)
-    QIS.stop_task()
+    CONFIG = {"app":{"width": 1280, "height": 720, "sync_loads": True, "headless": False, "renderer": "RayTracedLighting"},
+              "usd_path": None,
+              "grid_resolution": 1.0,
+              "control_cycle": 0.1 
+              }
+    QIS = QuadrotorIsaacSim()
+    
+    QIS.start()
+    
+    while QIS.is_running():
+        print("current simulation time: ", QIS.time)
+        
+        QIS.update()
+    QIS.stop()

@@ -23,7 +23,7 @@ class State:
     Stores the state of a given vehicle.
     """
 
-    def __init__(self, euler_order: str = "ZXY"):
+    def __init__(self, euler_order: str = "ZYX"):
         """
         Initialize the State object. 
         Inertial frame: ENU: Z-axis up; NED: Z-axis down
@@ -35,6 +35,7 @@ class State:
         self.position = torch.tensor([0.0, 0.0, 0.0])
 
         # The attitude (orientation) of the vehicle's body frame relative to the inertial frame
+        # The orientation of the vehicle in quaternion [qx, qy, qz, qw]. Defaults to [1.0, 0.0, 0.0, 0.0].
         self.attitude_quat = torch.tensor([0.0, 0.0, 0.0, 1.0])
         self.orient = torch.tensor([0.0, 0.0, 0.0])
         
@@ -51,25 +52,31 @@ class State:
         self.linear_acceleration = torch.tensor([0.0, 0.0, 0.0])
         self.euler_order  = euler_order
 
-    def update_state(self, position, attitude_quat, velocity):
+    def update_state(self, position, attitude_quat, linear_velocity, angular_velocity, linear_acceleration):
         """
         Args:
             position: torch.tensor 
             attitude_quat: quaternion of torch.tensor 
-            velocity: torch.tensor, includes 3 linear velocity and 3 angular velocity
+            linear_velocity: torch.tensor, includes 3 linear velocity
+            angular_velocity: torch.tensor, includes 3 angular velocity
+            linear_acceleration: torch.tensor
         """
         # # update information
         self.position = position
         
         self.attitude_quat = attitude_quat
-        self.R = Rotation.from_quat(attitude_quat.numpy(), scalar_first=True)  # input: w,x,y,z,
+        self.R = Rotation.from_quat(attitude_quat.numpy())  # input: [qx, qy, qz, qw]
         self.orient = self.rot_to_euler(self.R)  # output angle order depends on euler_order: z,y,x
 
-        try:
-            self.linear_velocity = velocity[:, :3]
-            self.angular_velocity = velocity[:, 3:]
-        except:
-            pass
+        # try:
+        #     self.linear_velocity = velocity[:, :3]
+        #     self.angular_velocity = velocity[:, 3:]
+        # except:
+        #     pass
+        self.linear_velocity = linear_velocity
+        self.angular_velocity = angular_velocity
+        
+        self.linear_acceleration = linear_acceleration
         
         # # update state in body frame
         self.R_body = self.R.inv()
@@ -107,7 +114,7 @@ class State:
         Returns:
             torch.Tensor: The quaternion [qx, qy, qz, qw] for FRD body frame relative to an NED inertial frame.
         """
-        attitude_frd_ned = rot_ENU_to_NED * Rotation.from_quat(self.attitude_quat.numpy(), scalar_first=True) * rot_FLU_to_FRD
+        attitude_frd_ned = rot_ENU_to_NED * Rotation.from_quat(self.attitude_quat.numpy()) * rot_FLU_to_FRD
         return torch.tensor(attitude_frd_ned.as_quat())
 
     def get_linear_body_velocity_ned_frd(self):
@@ -116,7 +123,7 @@ class State:
         Returns:
             torch.Tensor: The velocity [u,v,w] in the FRD body frame.
         """
-        linear_acc_body_flu = Rotation.from_quat(self.attitude_quat.numpy(), scalar_first=True).inv().apply(self.linear_acceleration.numpy())
+        linear_acc_body_flu = Rotation.from_quat(self.attitude_quat.numpy()).inv().apply(self.linear_acceleration.numpy())
         return torch.tensor(rot_FLU_to_FRD.apply(linear_acc_body_flu))
 
     def get_linear_velocity_ned(self):
@@ -147,14 +154,15 @@ class State:
 if __name__ == "__main__":
     # Initialize test inputs
     position = torch.tensor([1.0, 2.0, 3.0])
-    attitude_quat = torch.tensor([0.70711, 0.70711, 0.0, 0.0])  # Quaternion for a 90-degree rotation around X-axis
-    velocity = torch.tensor([[1.0, 0.5, -0.5, 0.1, 0.2, 0.3]])  # 3 linear and 3 angular velocities
-    
+    attitude_quat = torch.tensor([0.70711, 0.0, 0.0, 0.70711])  # Quaternion for a 90-degree rotation around X-axis
+    linear_velocity = torch.tensor([1.0, 0.5, -0.5])  # 3 linear velocities
+    angular_velocity = torch.tensor([0.1, 0.2, 0.3])  # 3 angular velocities
+    linear_acceleration = torch.tensor([0.0, 0.0, 0.0])
     # Initialize State object
     vehicle_state = State(euler_order='ZYX')
     
     # Update state
-    vehicle_state.update_state(position, attitude_quat, velocity)
+    vehicle_state.update_state(position, attitude_quat, linear_velocity, angular_velocity, linear_acceleration)
     
     # Print state attributes for verification
     print("Position in inertial frame:", vehicle_state.position)
