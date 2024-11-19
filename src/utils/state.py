@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation
 # Quaternion for rotation between ENU and NED INERTIAL frames
 # This rotation is symmetric, so q_ENU_to_NED == q_NED_to_ENU.
 # Note: this quaternion follows the convention [qx, qy, qz, qw]
-q_ENU_to_NED = torch.tensor([0.70711, 0.70711, 0.0, 0.0])
+q_ENU_to_NED = torch.tensor([0.70711, 0.70711, 0.0, 0.0], dtype=torch.float32)
 
 # A scipy rotation from the ENU inertial frame to the NED inertial frame of reference
 rot_ENU_to_NED = Rotation.from_quat(q_ENU_to_NED.numpy())
@@ -13,7 +13,7 @@ rot_ENU_to_NED = Rotation.from_quat(q_ENU_to_NED.numpy())
 # Quaternion for rotation between body FLU and body FRD frames
 # This rotation is symmetric, so q_FLU_to_FRD == q_FRD_to_FLU.
 # Note: this quaternion follows the convention [qx, qy, qz, qw]
-q_FLU_to_FRD = torch.tensor([1.0, 0.0, 0.0, 0.0])
+q_FLU_to_FRD = torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=torch.float32)
 
 # A scipy rotation from the FLU body frame to the FRD body frame
 rot_FLU_to_FRD = Rotation.from_quat(q_FLU_to_FRD.numpy())
@@ -32,24 +32,24 @@ class State:
         """
 
         # The position [x,y,z] of the vehicle's body frame relative to the inertial frame, expressed in the inertial frame
-        self.position = torch.tensor([0.0, 0.0, 0.0])
+        self.position = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
 
         # The attitude (orientation) of the vehicle's body frame relative to the inertial frame
         # The orientation of the vehicle in quaternion [qx, qy, qz, qw]. Defaults to [1.0, 0.0, 0.0, 0.0].
-        self.attitude_quat = torch.tensor([0.0, 0.0, 0.0, 1.0])
-        self.orient = torch.tensor([0.0, 0.0, 0.0])
+        self.attitude_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=torch.float32)
+        self.orient = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
         
         # The linear velocity [u,v,w] of the vehicle's body frame expressed in the body frame
-        self.linear_velocity_body = torch.tensor([0.0, 0.0, 0.0])
+        self.linear_velocity_body = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
 
         # The linear velocity [x_dot, y_dot, z_dot] of the vehicle's body frame expressed in the inertial frame
-        self.linear_velocity = torch.tensor([0.0, 0.0, 0.0])
+        self.linear_velocity = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
 
         # The angular velocity [wx, wy, wz] of the vehicle's body frame relative to the inertial frame
-        self.angular_velocity = torch.tensor([0.0, 0.0, 0.0])
+        self.angular_velocity = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
 
         # The linear acceleration [ax, ay, az] of the vehicle's body frame relative to the inertial frame
-        self.linear_acceleration = torch.tensor([0.0, 0.0, 0.0])
+        self.linear_acceleration = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
         self.euler_order  = euler_order
 
     def update_state(self, position, attitude_quat, linear_velocity, angular_velocity, linear_acceleration):
@@ -62,28 +62,28 @@ class State:
             linear_acceleration: torch.tensor
         """
         # # update information
-        self.position = position
+        self.position = position.to(dtype=torch.float32)
         
-        self.attitude_quat = attitude_quat
+        self.attitude_quat = attitude_quat.to(dtype=torch.float32)
         self.R = Rotation.from_quat(attitude_quat.numpy())  # input: [qx, qy, qz, qw]
         self.orient = self.rot_to_euler(self.R)  # output angle order depends on euler_order: z,y,x
-
+        
         # try:
         #     self.linear_velocity = velocity[:, :3]
         #     self.angular_velocity = velocity[:, 3:]
         # except:
         #     pass
-        self.linear_velocity = linear_velocity
-        self.angular_velocity = angular_velocity
+        self.linear_velocity = linear_velocity.to(dtype=torch.float32)
+        self.angular_velocity = angular_velocity.to(dtype=torch.float32)
         
-        self.linear_acceleration = linear_acceleration
+        self.linear_acceleration = linear_acceleration.to(dtype=torch.float32)
         
         # # update state in body frame
         self.R_body = self.R.inv()
         self.orient_body = self.rot_to_euler(self.R_body)
 
-        self.linear_velocity_body = torch.from_numpy(self.R_body.apply(self.linear_velocity.numpy()))
-        self.angular_velocity_body = torch.from_numpy(self.R_body.apply(self.angular_velocity.numpy()))
+        self.linear_velocity_body = torch.from_numpy(self.R_body.apply(self.linear_velocity.numpy())).to(dtype=torch.float32)
+        self.angular_velocity_body = torch.from_numpy(self.R_body.apply(self.angular_velocity.numpy())).to(dtype=torch.float32)
 
         return
 
@@ -94,7 +94,7 @@ class State:
 
         # Map to XYZ order
         order_map = {'X': 0, 'Y': 1, 'Z': 2}
-        orient_indices = [order_map[axis] for axis in self.euler_order]
+        orient_indices = [order_map[axis] for axis in self.euler_order.upper()]
         orient_xyz = [orient_temp[i] for i in orient_indices]
 
         # Convert to torch tensor with XYZ order

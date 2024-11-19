@@ -1,7 +1,9 @@
 # Numerical computations
 import sys
-sys.path.append("..")
-from scipy.spatial.transform import Rotation
+from pathlib import Path
+current_file_path = Path(__file__).resolve().parent
+sys.path.append(str(current_file_path.parent))
+
 import torch
 
 # Low level APIs
@@ -15,6 +17,7 @@ from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.usd import get_stage_next_free_path
 from omni.isaac.core.robots.robot import Robot
 from omni.isaac.dynamic_control import _dynamic_control
+from omni.isaac.core.articulations import Articulation
 
 # Extension APIs
 from utils.state import State
@@ -41,13 +44,14 @@ class Vehicle(Robot):
     
     def __init__(
         self,
-        stage_prefix: str = "/World/envs/Crazyflie_00",
+        stage_prefix: str = "/quadrotor",
         usd_path: str = None,
         init_pos=[0.0, 0.0, 0.0],
         init_orient=[0.0, 0.0, 0.0, 1.0],
         scale=[1.0, 1.0, 1.0],
         sensors=[],
-        graphical_sensors=[]
+        graphical_sensors=[],
+        backends=[]
     ):
         """
         Class that initializes a vehicle in the isaac sim's curent stage
@@ -70,13 +74,13 @@ class Vehicle(Robot):
         
         # Get the vehicle name by taking the last part of vehicle stage prefix
         self._vehicle_name = self._stage_prefix.rpartition("/")[-1]
-        
+
         # Spawn the vehicle primitive in the world's stage
         # self._prim = define_prim(self._stage_prefix, "Xform")
         # self._prim = get_prim_at_path(self._stage_prefix)
         # self._prim.GetReferences().AddReference(self._usd_file)
         add_reference_to_stage(self._usd_file, self._stage_prefix)
-        
+
         # Initialize the "Robot" class
         # Note: we need to change the rotation to have qw first, because NVidia
         # does not keep a standard of quaternions inside its own libraries (not good, but okay)
@@ -84,8 +88,8 @@ class Vehicle(Robot):
             prim_path=self._stage_prefix,
             name=self._vehicle_name,
             position=init_pos,
-            orientation=init_orient, # x,y,z,w
-            scale=torch.tensor(scale),
+            orientation=[init_orient[3], init_orient[0], init_orient[1], init_orient[2]], # w,x,y,z
+            scale=scale,
             articulation_controller=None,
         )
 
@@ -94,7 +98,7 @@ class Vehicle(Robot):
         # Add this object for the world to track, so that if we clear the world, this object is deleted from memory and
         # as a consequence, from the VehicleManager as well
         self._world.scene.add(self)
-
+                
         # Variable that will hold the current state of the vehicle
         self._state = State(euler_order='ZYX')
         
@@ -128,6 +132,19 @@ class Vehicle(Robot):
 
         # Add callbacks to the rendering engine to update each graphical sensor at every timestep of the rendering engine
         self._world.add_render_callback(self._stage_prefix + "/GraphicalSensors", self.update_graphical_sensors)
+
+        # --------------------------------------------------------------------
+        # -------------------- Add control backends to the vehicle -----------
+        # --------------------------------------------------------------------
+        self._backends = backends
+
+        # Initialize the backends
+        for backend in self._backends:
+            backend.initialize(self)
+
+        # Add a callbacks for the
+        self._world.add_physics_callback(self._stage_prefix + "/Control_state", self.update_sim_state)
+
 
     """
     Properties
@@ -210,7 +227,7 @@ class Vehicle(Robot):
         rotation_quat_img = rotation_quat.GetImaginary()
         # Get the quaternion according to the [qx, qy, qz, qw] standard
         attitude_quat = torch.tensor(
-            [rotation_quat_img[0], rotation_quat_img[1], rotation_quat_img[2], rotation_quat_real]
+            [rotation_quat_img[0], rotation_quat_img[1], rotation_quat_img[2], rotation_quat_real], dtype=torch.float32
         )
         
         # The linear velocity [x_dot, y_dot, z_dot] of the vehicle's body frame expressed in the inertial frame of reference
@@ -223,8 +240,7 @@ class Vehicle(Robot):
         linear_acceleration = (linear_vel - self._state.linear_velocity) / dt
 
         # Update the state variables
-        self._state.update_state(torch.tensor(pose.p), attitude_quat, linear_vel, ang_vel, linear_acceleration)
-        
+        self._state.update_state(torch.tensor(pose.p, dtype=torch.float32), attitude_quat, linear_vel, ang_vel, linear_acceleration)
 
     def start(self):
         """
@@ -278,6 +294,16 @@ class Vehicle(Robot):
         for sensor in self._graphical_sensors:
             sensor_data = sensor.update(self._state, event.payload['dt'])
 
+    def update_sim_state(self, dt: float):
+        """
+        Callback that is used to "send" the current state for each backend being used to control the vehicle. This callback
+        is called on every physics step.
+
+        Args:
+            dt (float): The time elapsed between the previous and current function calls (s).
+        """
+        for backend in self._backends:
+            backend.update_state(self._state)
 
     def get_dc_interface(self):
         """Get the dynamic_control_interface."""

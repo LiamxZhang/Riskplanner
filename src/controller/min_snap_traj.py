@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 
 class SnapTrajectory:
-    def __init__(self, degree):
+    def __init__(self, degree=7):
         self.degree = degree
         self.reset()
 
@@ -288,7 +288,7 @@ class SnapTrajectory:
         # return results
         return np.array(V.value)
 
-    def output_next_traj_point(self, i = 20):
+    def output_next_traj_point(self, i = 50):
         """
         outputs the next trajectory point for x, y, z, and psi
         """
@@ -297,7 +297,7 @@ class SnapTrajectory:
         # z^0, z^1, z^2, ... z^n, 
         # yaw^0, yaw^1, yaw^2, ... yaw^n"]
         traj_all = []
-        # first set of parameters
+        # Use the first set of parameters
         t_all = np.linspace(self.timestamps[0], self.timestamps[1], num=100, endpoint=True)
         T = t_all[i]
 
@@ -351,6 +351,65 @@ class SnapTrajectory:
         # print("traj: ", traj)
         
         return traj
+    
+    def get_point_at_time(self, timestamps_index, T):
+        i = timestamps_index
+        traj_all = []
+        # For different control loops: position, velocity, acceleration, jerk
+        for loop in range(4):
+            traj_loop = []
+            # For different dimensions: x, y, z, yaw
+            for dim in range(4): 
+                sigma = self.variables[4*i + dim]
+                t_poly = []
+                for degree in range(loop, self.degree + 1): # all degrees of each variable
+                    # Prepare coefficient
+                    coef = 1
+                    for l in range(loop):
+                        coef *= degree - l
+                    # Calculate all time terms
+                    t_poly.append(coef*T ** (degree-loop))
+                # print("sigma: ", sigma)
+                traj_loop.append(np.dot(sigma[loop:], t_poly)) # get a scalar value
+            #
+            traj_all.append(traj_loop)
+
+        traj = {
+                "position": traj_all[0][:3],       # the target positions [m]
+                "velocity": traj_all[1][:3],       # velocity [m/s]
+                "acceleration": traj_all[2][:3],   # accelerations [m/s^2]
+                "jerk": traj_all[3][:3],           # jerk [m/s^3]
+                "yaw_angle": traj_all[0][3],       # yaw-angle [rad]
+                "yaw_rate": traj_all[1][3],        # yaw-rate [rad/s]
+                "time": T,
+            }
+        return traj
+
+    def output_traj_points(self,num_points=5):
+        """
+        outputs a series of trajectory points for x, y, z, and psi
+        """
+        traj_all = []
+        t_all = [] 
+        
+        for ts in range(len(self.timestamps) - 1):
+            # Prepare the time slots
+            ti = self.timestamps[ts]
+            tf = self.timestamps[ts + 1]
+            if ts == len(self.timestamps) - 2:
+                time_array = np.linspace(ti, tf, num=num_points, endpoint=True)
+            else:
+                time_array = np.linspace(ti, tf, num=num_points, endpoint=False)
+            t_all.extend(time_array)
+
+            traj_ts = []
+            for T in time_array:
+                traj_ts.append(self.get_point_at_time(ts, T))
+            
+            traj_all.extend(traj_ts)
+        # print("traj_all: ", traj_all)
+        return traj_all
+    
 
     def plot_traj(self):
         """
@@ -431,8 +490,9 @@ if __name__ == "__main__":
 
     # Straight lines
     # w = [[0],[0],[0],[0],[0],  [1],[1],[1],[0],[4], [2],[2],[0],[0],[8]]
-    w = [[0],[0],[10],[1.57],[0], 
+    w = [[0,-0.5],[0,0.1],[10,0.2],[1.57],[0], 
         [0.25],[0],[10],[1.57],[0.066]]
+    
     # w = [[x],[y],[z],[psi],[t],...]
     # Circle                                    waypoint number
     # w = [[0, -0.5], [0, 0], [0], [0], [0],      # 1
@@ -447,6 +507,7 @@ if __name__ == "__main__":
     st.traj(w)
     # st.traj_stepwise(w)
     st.output_next_traj_point()
+    st.output_traj_points()
     st.plot_traj()
     st.output_csv('traj.csv')
     # data = st.input_csv('cf_traj.csv')

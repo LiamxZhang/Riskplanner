@@ -92,3 +92,31 @@ def print_prim_and_grid(prim_grid):
         # if "Floor" in prim_path:
         print(f"Prim: {prim}")
         print("Grid centers: ", grid_centers)
+
+
+def traj_tensor(index, traj_list):
+    """
+    Method that converts the current trajectory point to torch tensor.
+
+    Args:
+        index: list index
+        traj_list: The list that contains target trajectory points of the vehicle. 
+        An example point is given:
+            traj = {
+                        "position": [x, y, z],       # the target positions [m]
+                        "velocity": [vx, vy, vz],    # velocity [m/s]
+                        "acceleration": [ax, ay, az],    # accelerations [m/s^2]
+                        "jerk": [jx, jy, jz],            # jerk [m/s^3]
+                        "yaw_angle": yaw,                # yaw-angle [rad]
+                        "yaw_rate": yaw_rate             # yaw-rate [rad/s]
+                    }
+    """
+    traj = traj_list[index]
+    p_ref = torch.tensor(traj["position"], dtype=torch.float32)          # 3-element tensor for position
+    v_ref = torch.tensor(traj["velocity"], dtype=torch.float32)          # 3-element tensor for velocity
+    a_ref = torch.tensor(traj["acceleration"], dtype=torch.float32)      # 3-element tensor for acceleration
+    j_ref = torch.tensor(traj["jerk"], dtype=torch.float32)              # 3-element tensor for jerk
+    yaw_ref = torch.tensor(traj["yaw_angle"], dtype=torch.float32)       # scalar tensor for yaw
+    yaw_rate_ref = torch.tensor(traj["yaw_rate"], dtype=torch.float32)   # scalar tensor for yaw rate
+    time = torch.tensor(traj["time"], dtype=torch.float32) 
+    return p_ref, v_ref, a_ref, j_ref, yaw_ref, yaw_rate_ref, time

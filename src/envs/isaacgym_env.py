@@ -1,6 +1,5 @@
 # This script setup the isaac sim environment
 #
-import sys
 import math
 import time
 import carb
@@ -14,7 +13,11 @@ from omni.isaac.kit import SimulationApp
 #from omni.isaac.occupancy_map import _occupancy_map
 #import omni.isaac.core.utils.prims as prims_utils
 
-sys.path.append('..')
+# Extension APIs
+import sys
+from pathlib import Path
+current_file_path = Path(__file__).resolve().parent
+sys.path.append(str(current_file_path.parent))
 from utils.task_util import point_to_plane_distance, print_prim_and_grid, is_masked
 from configs.configs import APP_SETTINGS, MAP_ASSET, WORLD_SETTINGS, CONTROL_PARAMS
 

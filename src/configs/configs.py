@@ -24,19 +24,19 @@ WORLD_SETTINGS = {
 
 # Define the parameters for the crazyflie quadrotor
 ROBOT_PARAMS = {
-    "stage_prefix": "/World/envs/Crazyflie_00",
-    "name": "Crazyflie",
-    "usd_path": "/Isaac/Robots/Crazyflie/cf2x.usd", # Under the folder of get_assets_root_path()
-    "init_position": [0.0, 0.0, 10.0],
-    "init_orientation": [0.0, 0.0, 90.0],
-    "scale": [5,5,5],
+    "stage_prefix": "/World/envs/Iris_00",
+    "name": "Iris",
+    # "usd_path": "/Isaac/Robots/Crazyflie/cf2x.usd", # Under the folder of get_assets_root_path()
+    "usd_path": "omniverse://localhost/Library/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Robots/Iris/iris.usd",
+    "init_position": [0.0, 0.0, 0.2],
+    "init_orientation": [0.0, 0.0, 0.0, 1.0],
+    "scale": [1,1,1],
 }
-
-
 
 # Define the parameters for the robot controller and planner
 CONTROL_PARAMS = {
     "grid_resolution": 1.0,
-    "control_cycle": 0.06,
+    "control_cycle": 0.5,   # valid min 0.06, but effective min 0.5
+    "num_rotors": 4,
 }
 

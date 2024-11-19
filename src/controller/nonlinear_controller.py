@@ -1,26 +1,26 @@
 #!/usr/bin/env python
-"""
-| File: nonlinear_controller.py
-| Author: Marcelo Jacinto and Joao Pinto (marcelo.jacinto@tecnico.ulisboa.pt, joao.s.pinto@tecnico.ulisboa.pt)
-| License: BSD-3-Clause. Copyright (c) 2023, Marcelo Jacinto. All rights reserved.
-| Description: This files serves as an example on how to use the control backends API to create a custom controller 
-for the vehicle from scratch and use it to perform a simulation, without using PX4 nor ROS. In this controller, we
-provide a quick way of following a given trajectory specified in csv files or track an hard-coded trajectory based
-on exponentials! NOTE: This is just an example, to demonstrate the potential of the API. A much more flexible solution
-can be achieved
-"""
+import sys
+from pathlib import Path
+current_file_path = Path(__file__).resolve().parent
+sys.path.append(str(current_file_path.parent))
 
 # Imports to be able to log to the terminal with fancy colors
 import carb
-import time
+
 # Auxiliary scipy and numpy modules
-import numpy as np
-from scipy.spatial.transform import Rotation
 import torch
+from scipy.spatial.transform import Rotation
+
+# 
 from omni.isaac.dynamic_control import _dynamic_control
+from utils.state import State
+from utils.task_util import traj_tensor
+from min_snap_traj import SnapTrajectory
+from backend import Backend
+from configs.configs import CONTROL_PARAMS
 
 
-class NonlinearController():
+class NonlinearController(Backend):
     """A nonlinear controller class. It implements a nonlinear controller that allows a vehicle to track
     aggressive trajectories. This controlers is well described in the papers
     
@@ -33,27 +33,29 @@ class NonlinearController():
     """
 
     def __init__(self, 
-        default_env_path: str=None, 
+        stage_prefix: str=None,
         results_file: str=None,
-        Kp=[1.0, 1.0, 1.0],
-        Kd=[0.85, 0.85, 0.85],
-        Ki=[0.15, 0.15, 0.15],
-        Kr=[0.35, 0.35, 0.35],
-        Kw=[0.05, 0.05, 0.05]):
+        Kp=[10.0, 10.0, 10.0],
+        Kd=[8.5, 8.5, 8.5],
+        Ki=[1.50, 1.50, 1.50],
+        Kr=[3.5, 3.5, 3.5],
+        Kw=[0.5, 0.5, 0.5]):
 
-        self.default_env_path = default_env_path
-        self._vehicle_dc_interface = _dynamic_control.acquire_dynamic_control_interface()
-        self._num_rotors = 4  # Four propellers
+        # Handle input
+        self._stage_prefix = stage_prefix
+        self.results_files = results_file # Lists used for analysing performance statistics
 
         # The current rotor references [rad/s]
         self.input_ref = [0.0, 0.0, 0.0, 0.0]
 
         # The current state of the vehicle expressed in the inertial frame (in ENU)
         self.p = torch.zeros(3)                          # The vehicle position
-        self.R = Rotation.identity()                     # The vehicle attitude (stays as Rotation object)
+        self.R: Rotation = Rotation.identity()           # The vehicle attitude (stays as Rotation object)
         self.w = torch.zeros(3)                          # The angular velocity of the vehicle
         self.v = torch.zeros(3)                          # The linear velocity of the vehicle in the inertial frame
         self.a = torch.zeros(3)                          # The linear acceleration of the vehicle in the inertial frame
+        self.orient = torch.zeros(3)
+
         self.int = torch.tensor([0.0, 0.0, 0.0])         # The integral of position error
 
         # Define the control gains matrix for the outer-loop
@@ -63,26 +65,32 @@ class NonlinearController():
         self.Kr = torch.diag(torch.tensor(Kr))
         self.Kw = torch.diag(torch.tensor(Kw))
 
+        self._vehicle_dc_interface = None
+
+        # Define the dynamic parameters for the vehicle
+        self.m = 1.50   # Mass in Kg
+        self.g = 9.81              # The gravity acceleration ms^-2
+        self._num_rotors = CONTROL_PARAMS['num_rotors']
+
         # Set the initial time for starting when using the built-in trajectory (the time is also used in this case
         # as the parametric value)
         self.total_time = 0.0
+        self.index = 0
         # Signal that we will not used a received trajectory
         self.trajectory = None
+        self.traj_generator = SnapTrajectory(7) # self.traj_generator.traj(waypoints)
 
         # Auxiliar variable, so that we only start sending motor commands once we get the state of the vehicle
         self.received_first_state = False
 
         # Lists used for analysing performance statistics
         self.results_files = results_file
+        self.reset_statistics()
 
-    def start(self,gravity=9.81):
+    def start(self):
         """
         Reset the control and trajectory index
         """
-        # Define the dynamic parameters for the vehicle
-        self.m = self.get_mass()       # Mass in Kg
-        self.g = gravity               # The gravity acceleration ms^-2
-
         self.reset_statistics()
 
     def stop(self):
@@ -94,56 +102,73 @@ class NonlinearController():
         if self.results_files is None:
             return
         
+        # Convert lists to torch tensors
         statistics = {}
-        statistics["time"] = np.array(self.time_vector)
-        statistics["p"] = np.vstack(self.position_over_time)
-        statistics["desired_p"] = np.vstack(self.desired_position_over_time)
-        statistics["ep"] = np.vstack(self.position_error_over_time)
-        statistics["ev"] = np.vstack(self.velocity_error_over_time)
-        statistics["er"] = np.vstack(self.attitude_error_over_time)
-        statistics["ew"] = np.vstack(self.attitude_rate_error_over_time)
-        np.savez(self.results_files, **statistics)
+        statistics["time"] = torch.tensor(self.time_vector, dtype=torch.float32)
+        statistics["p"] = torch.stack(self.position_over_time)
+        statistics["desired_p"] = torch.stack(self.desired_position_over_time)
+        statistics["ep"] = torch.stack(self.position_error_over_time)
+        statistics["ev"] = torch.stack(self.velocity_error_over_time)
+        statistics["er"] = torch.stack(self.attitude_error_over_time)
+        statistics["ew"] = torch.stack(self.attitude_rate_error_over_time)
+        torch.save(statistics, self.results_files)
+
         carb.log_warn("Statistics saved to: " + self.results_files)
 
         self.reset_statistics()
 
-    def update_state(self, state):
+    def update_state(self, state: State):
         """
         Method that updates the current state of the vehicle. This is a callback that is called at every physics step
 
         Args:
             state (State): The current state of the vehicle.
         """
-        self.p = state["position"]
-        self.R = Rotation.from_euler('xyz', state["attitude"])
-        self.w = state["angular_velocity"]
-        self.v = state["linear_velocity"]
+        self.p = state.position
+        self.R = state.R
+        self.orient = state.orient # as_euler('ZYX', degrees=True)
+        self.v = state.linear_velocity
+        self.w = state.angular_velocity
 
         self.received_first_state = True
+        carb.log_warn(f"state.position is: {self.p}")
 
-    def update_trajectory(self, traj):
+    def update_trajectory(self, points):
         """
-        Method that updates the current target trajectory point of the vehicle. This is a callback that is called at every physics step
-
+        Generate waypoints based on current state and path points.
         Args:
-            traj: The current target trajectory point of the vehicle. An example is given:
-                traj = {
-                            "position": [x, y, z],       # the target positions [m]
-                            "velocity": [vx, vy, vz],    # velocity [m/s]
-                            "acceleration": [ax, ay, az],    # accelerations [m/s^2]
-                            "jerk": [jx, jy, jz],    # jerk [m/s^3]
-                            "yaw_angle": yaw,           # yaw-angle [rad]
-                            "yaw_rate": yaw_rate  # yaw-rate [rad/s]
-                        }
+            points (list): List of path points, each as [x, y, z, yaw].
+        Returns:
+            list: Waypoints.
         """
-        self.p_ref = torch.tensor(traj["position"], dtype=torch.float)          # 3-element tensor for position
-        self.v_ref = torch.tensor(traj["velocity"], dtype=torch.float)          # 3-element tensor for velocity
-        self.a_ref = torch.tensor(traj["acceleration"], dtype=torch.float)      # 3-element tensor for acceleration
-        self.j_ref = torch.tensor(traj["jerk"], dtype=torch.float)              # 3-element tensor for jerk
-        self.yaw_ref = torch.tensor(traj["yaw_angle"], dtype=torch.float)       # scalar tensor for yaw
-        self.yaw_rate_ref = torch.tensor(traj["yaw_rate"], dtype=torch.float)   # scalar tensor for yaw rate
+        # integrate the current state with waypoints
+        waypoints = []
+        t0 = 0.0
+        x0, y0, z0 = self.p.tolist()
+        psi0 = self.orient[2].item()
+        dx0, dy0, dz0 = self.v .tolist()
+        dpsi0 = self.w[2].item()
+        waypoints.extend([
+        [x0, dx0],  # Initial x and its derivatives
+        [y0, dy0],  # Initial y and its derivatives
+        [z0, dz0],  # Initial z and its derivatives
+        [psi0, dpsi0],         # Initial yaw and its derivatives
+        [t0]])
 
-        return self.p_ref, self.v_ref, self.a_ref, self.j_ref, self.yaw_ref, self.yaw_rate_ref
+        # Add each point in the path
+        dt = CONTROL_PARAMS['control_cycle']
+        for i, point in enumerate(points):
+            x, y, z, psi = point
+            waypoints.extend([[x], [y], [z], [psi], [t0 + (i+1)*dt]])
+
+        # 
+        self.traj_generator.traj(waypoints)
+        self.trajectory = self.traj_generator.output_traj_points()
+        self.max_index = len(self.trajectory)
+        self.index = 0
+        self.traj_time = 0.0
+        self.time_ref = 0.0
+        carb.log_warn(f"trajectory is: {self.trajectory}")
 
     def input_reference(self):
         """
@@ -153,6 +178,7 @@ class NonlinearController():
             A list with the target angular velocities for each individual rotor of the vehicle
         """
         return self.input_ref
+
 
     def update(self, dt: float):
         """
@@ -165,21 +191,27 @@ class NonlinearController():
 
         if self.received_first_state == False:
             return
-
+        self.total_time += dt
         # -------------------------------------------------
         # Update the references for the controller to track
         # -------------------------------------------------
-        self.total_time += dt
-
+        
+        self.traj_time += dt
+        if self.index < self.max_index - 1 and self.traj_time >= self.time_ref:
+            self.index += 1
+        carb.log_warn(f"index is: {self.index}")
         # Update using an external trajectory
-        # p_ref = torch.zeros(3)
-        # v_ref = torch.zeros(3)
-        # a_ref = torch.zeros(3)
-        # j_ref = torch.zeros(3)
-        # yaw_ref = torch.tensor(0, dtype=torch.float)
-        # yaw_rate_ref = torch.tensor(0, dtype=torch.float)
-        p_ref, v_ref, a_ref, j_ref, yaw_ref, yaw_rate_ref = self.p_ref, self.v_ref, self.a_ref, self.j_ref, self.yaw_ref, self.yaw_rate_ref
-
+        if self.trajectory is not None:
+            p_ref, v_ref, a_ref, j_ref, yaw_ref, yaw_rate_ref, self.time_ref = traj_tensor(self.index, self.trajectory)
+        else:
+            p_ref = self.p
+            v_ref = self.v
+            a_ref = torch.zeros(3) 
+            j_ref = torch.zeros(3)
+            yaw_ref = self.orient[2].item()
+            yaw_rate_ref = self.w[2].item()
+            self.time_ref = 0.0
+        carb.log_warn(f"reference is: {p_ref}, {yaw_ref}, {v_ref}")
         # -------------------------------------------------
         # Start the controller implementation
         # -------------------------------------------------
@@ -193,59 +225,47 @@ class NonlinearController():
             ev = ev.squeeze(0)
         self.int = self.int + (ep * dt)
         ei = self.int
-        print("ep: ", ep)
-        print("ev: ", ev)
         
         # Compute F_des term
         F_des = -(self.Kp @ ep) - (self.Kd @ ev) - (self.Ki @ ei) + torch.tensor([0.0, 0.0, self.m * self.g]) + (self.m * a_ref)
-        print("F_des: ", F_des)
         # Get the current axis Z_B (given by the last column of the rotation matrix)
         Z_B = torch.tensor(self.R.as_matrix()[:, 2], dtype=torch.float)
-        print("Z_B: ", Z_B)
         # Get the desired total thrust in Z_B direction (u_1)
         u_1 = torch.dot(F_des, Z_B.squeeze())
         
         # Compute the desired body-frame axis Z_b
         Z_b_des = F_des / torch.norm(F_des)
-        print("Z_b_des: ", Z_b_des)
         # Compute X_C_des
         X_c_des = torch.tensor([torch.cos(yaw_ref), torch.sin(yaw_ref), 0.0])
-        print("X_c_des: ", X_c_des)
         # Compute Y_b_des
         Z_b_cross_X_c = torch.linalg.cross(Z_b_des, X_c_des)
-        print("Z_b_cross_X_c: ", Z_b_cross_X_c)
         Y_b_des = Z_b_cross_X_c / torch.norm(Z_b_cross_X_c)
-        print("Y_b_des: ", Y_b_des)
         # Compute X_b_des
         X_b_des = torch.cross(Y_b_des, Z_b_des)
-        print("X_b_des: ", X_b_des)
         # Compute the desired rotation R_des = [X_b_des | Y_b_des | Z_b_des]
         R_des = torch.column_stack((X_b_des, Y_b_des, Z_b_des))
-        R = torch.tensor(self.R.as_matrix().squeeze(0), dtype=torch.float)
+        R = torch.tensor(self.R.as_matrix(), dtype=torch.float)
         
         # Compute the rotation error
         e_R = 0.5 * self.vee((R_des.T @ R) - (R.T @ R_des))
         if e_R.dim() == 2 and e_R.shape[0] == 1:
             e_R = e_R.squeeze(0)
-        print("e_R: ", e_R)
         # Compute an approximation of the current vehicle acceleration in the inertial frame (since we cannot measure it directly)
         self.a = (u_1 * Z_B) / self.m - torch.tensor([0.0, 0.0, self.g])
-        print("self.a: ", self.a)
         # Compute the desired angular velocity by projecting the angular velocity in the Xb-Yb plane
         hw = (self.m / u_1) * (j_ref - torch.dot(Z_b_des, j_ref) * Z_b_des)
-        print("hw: ", hw)
         # desired angular velocity
         w_des = torch.tensor([-torch.dot(hw, Y_b_des), torch.dot(hw, X_b_des), yaw_rate_ref * Z_b_des[2]], dtype=torch.float)
-        print("w_des: ", w_des)
         # Compute the angular velocity error
         e_w = self.w - w_des
         if e_w.dim() == 2 and e_w.shape[0] == 1:
             e_w = e_w.squeeze(0)
-        print("e_w: ", e_w)
         # Compute the torques to apply on the rigid body
         tau = -(self.Kr @ e_R) - (self.Kw @ e_w)
-        print("controller force: ", u_1, tau)
         
+        if self.vehicle:
+            self.input_ref = self.vehicle.force_and_torques_to_velocities(u_1, tau)
+        carb.log_warn(f"input_reference is: {self.input_ref}")
         # ----------------------------
         # Statistics to save for later
         # ----------------------------
@@ -257,8 +277,6 @@ class NonlinearController():
         self.attitude_error_over_time.append(e_R)
         self.attitude_rate_error_over_time.append(e_w)
 
-        return u_1, tau
-
     def get_dc_interface(self):
         """ Get interface of Dynamic Control """
         if self._vehicle_dc_interface is None:
@@ -266,19 +284,18 @@ class NonlinearController():
         return self._vehicle_dc_interface
 
     def get_mass(self):
-        """ Get the overall mass of Crazyflie robot """
-        self.drone_stage_prefix = self.default_env_path + "/Crazyflie"
+        """ Get the overall mass of robot """
         # get mass of main body
-        rb_body = self._vehicle_dc_interface.get_rigid_body(self.drone_stage_prefix + "/body")
-        body_properties = self._vehicle_dc_interface.get_rigid_body_properties(rb_body)
+        rb_body = self.get_dc_interface().get_rigid_body(self._stage_prefix + "/body")
+        body_properties = self.get_dc_interface().get_rigid_body_properties(rb_body)
         mass = body_properties.mass
 
         # get mass of four propellers
-        rotors = [self._vehicle_dc_interface.get_rigid_body(self.drone_stage_prefix + "/m" + str(i+1) + "_prop") for i in range(self._num_rotors)]
+        rotors = [self.get_dc_interface().get_rigid_body(self.drone_stage_prefix + "/rotor" + str(i)) for i in range(self._num_rotors)]
         for rotor in rotors:
-            properties = self._vehicle_dc_interface.get_rigid_body_properties(rotor)
+            properties = self.get_dc_interface().get_rigid_body_properties(rotor)
             mass += properties.mass
-        print("Mass: ", mass)
+        # print("Mass: ", mass)
         
         return mass
     
@@ -370,3 +387,6 @@ class NonlinearController():
         self.velocity_error_over_time = []
         self.attitude_error_over_time = []
         self.attitude_rate_error_over_time = []
+
+if __name__ == "__main__":
+    controller = NonlinearController()
