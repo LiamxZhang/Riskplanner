@@ -48,7 +48,7 @@ def is_point_in_polygon(point, poly_world_vertex):
         angle = torch.acos(dot_product / (v1_norm * v2_norm))
         angle_sum += angle
 
-    return torch.isclose(angle_sum, torch.tensor(2 * torch.pi, dtype=torch.float64))
+    return torch.isclose(angle_sum, torch.tensor(2 * torch.pi, dtype=torch.float32) )
 
 def point_to_plane_distance(point, poly_world_vertex):
     """
@@ -63,7 +63,7 @@ def point_to_plane_distance(point, poly_world_vertex):
     vec2 = p2 - p0
 
     # Calculate the plane normal vector (cross product of vec1 and vec2)
-    normal = torch.cross(vec1, vec2)
+    normal = torch.linalg.cross(vec1, vec2)
     normal = normal / torch.norm(normal)
     
     # Calculate the D in plane Ax + By + Cz + D = 0

@@ -88,7 +88,7 @@ class QuadraticThrustCurve():
             # Only apply clipping of the input reference
             self._velocity[i] = torch.maximum(
                 self.min_rotor_velocity[i], 
-                torch.minimum(torch.tensor(self._input_reference[i]), self.max_rotor_velocity[i])
+                torch.minimum(self._input_reference[i].clone().detach(), self.max_rotor_velocity[i])
             )
 
             # Set the force using a quadratic thrust curve

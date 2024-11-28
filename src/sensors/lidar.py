@@ -3,93 +3,89 @@
 # based on the range_sensor and 
 # omni.kit.commands.execute of rotating lidar
 
-# #
-import time
+# Common APIs
 import numpy as np
-import omni
+import torch
 from typing import Optional, Tuple, List
 import open3d as o3d
 
+# Isaac sim APIs
+import omni
 from omni.isaac.range_sensor import _range_sensor
+from omni.usd import get_stage_next_free_path
+
 from pxr import Gf, PhysicsSchemaTools, Sdf, Semantics, UsdGeom, UsdLux, UsdPhysics
 
-class RotatingLidar():
-    def __init__(
-        self,
-        config,
-        number: Optional[int] = 0,
-        rotation_rate: Optional[float] = None,
-        translation: Optional[Tuple[float, float, float]] = None,
-        orientation: Optional[np.ndarray] = None,
-        fov: Optional[Tuple[float, float]] = None,
-        resolution: Optional[Tuple[float, float]] = None,
-        valid_range: Optional[Tuple[float, float]] = None,
-        visualization: Optional[bool] = True,
-    ) -> None:
+# Extension APIs
+import sys
+from pathlib import Path
+current_file_path = Path(__file__).resolve().parent
+sys.path.append(str(current_file_path.parent))
 
-        self.number = number
-        self.update_config(config)
-        self.set_lidar()
-        self.accumulated_point_clouds = np.empty(shape=(0,3))
-        self.temporary_point_clouds = np.empty(shape=(0,3))
-        self.accumulate_step_length = 3  # steps waiting to be displayed 
+from utils.state import State
+from sensors.graphical_sensor import GraphicalSensor
+from envs.isaacgym_env import QuadrotorIsaacSim
+from configs.configs import LIDAR_PARAMS
 
-        return
-    # 
-    # def set_configuration(self,number,rotation_rate,translation,orientation,fov,resolution,valid_range):
-    #     # path
-    #     prim_path = f"/World/envs/env_{number}"
-    #     self.parent = prim_path + "/Crazyflie/body"
-    #     self.lidarPath = "/lidar"
-    #     self.lidar_path = self.parent+self.lidarPath
 
-    #     # set default values
-    #     # refer to RoboSense LiDar
-    #     self.min_range, self.max_range = (0.4, 250.0) if valid_range is None else valid_range
-    #     self.horizontal_fov, self.vertical_fov = (360.0, 70.0) if fov is None else fov
-    #     self.horizontal_resolution, self.vertical_resolution = (0.2, 0.4) if resolution is None else resolution
-    #     self.rotation_rate = 0.0 if rotation_rate is None else rotation_rate    # assume 10 Hz
-    #     self.orientation = 0.0 if orientation is None else orientation
-    #     self.translation = (0.0, 0.0, 0.05) if translation is None else translation
+class RotatingLidar(GraphicalSensor):
+    def __init__(self):
+        # Setup the name of the camera primitive path
+        self._lidar_name = "lidar"
+        self._stage_prim_path = ""
 
-    #     # flags
-    #     self.draw_lines = False
-    #     self.display_points = True
-    #     self.multi_line_mode = True
-    #     self.enable_semantics = True
-    #     return
+        # Initialize the Super class "object" attributes
+        super().__init__(sensor_type=LIDAR_PARAMS['type'], update_rate=LIDAR_PARAMS['frequency']) 
 
-    def update_config(self, config):
+        self.accumulated_point_clouds = torch.empty((0, 3), dtype=torch.float32)
+        self.temporary_point_clouds = torch.empty((0, 3), dtype=torch.float32)
+        self.accumulate_step_length = 3  # num of steps to be accumulated 
+
+        # Create the lidar interface
+        self.lidarInterface = _range_sensor.acquire_lidar_sensor_interface() # Used to interact with the LIDAR
+
+
+    def update_config(self):
         '''
         config = config['lidar']
         '''
-        prim_path = f"/World/envs/env_{self.number}"
-        self.parent = prim_path + "/Crazyflie/body"
-        self.lidarPath = "/lidar"
-        self.lidar_path = self.parent+self.lidarPath
+        # Prepare the primary/temporary lidar path
+        self.parent = self._vehicle.stage_prefix + "/body"
+        self.lidarPath = "/" + self._lidar_name
+        self.lidar_primary_path = self.parent + self.lidarPath
 
-        self.min_range, self.max_range = config['range']
-        self.horizontal_fov, self.vertical_fov = config['fov']
-        self.horizontal_resolution, self.vertical_resolution = config['resolution']
-        self.rotation_rate = config['rotation_rate']
-        self.orientation = config['orientation']
-        self.translation = config['translation']
+        # Get the complete stage prefix for the lidar
+        self._stage_prim_path = get_stage_next_free_path(QuadrotorIsaacSim().world.stage, self.lidar_primary_path, False)
+
+        # Get the camera name that was actually created (and update the camera name)
+        self._lidar_name = self._stage_prim_path.rpartition("/")[-1]
+
+        # Parameters
+        self.min_range, self.max_range = LIDAR_PARAMS['range']
+        self.horizontal_fov, self.vertical_fov = LIDAR_PARAMS['fov']
+        self.horizontal_resolution, self.vertical_resolution = LIDAR_PARAMS['resolution']
+        self.rotation_rate = LIDAR_PARAMS['rotation_rate']
+        self.orientation = LIDAR_PARAMS['orientation']
+        self.translation = LIDAR_PARAMS['translation']
         
-        # flags
-        self.draw_lines = config['draw_lines']
-        self.display_points = config['display_points']
-        self.multi_line_mode = config['multi_line_mode']
-        self.enable_semantics = config['enable_semantics']
-        self.visualization = config['visualization']
-        return
+        # Flags
+        self.draw_lines = LIDAR_PARAMS['draw_lines']
+        self.display_points = LIDAR_PARAMS['display_points']
+        self.multi_line_mode = LIDAR_PARAMS['multi_line_mode']
+        self.enable_semantics = LIDAR_PARAMS['enable_semantics']
+        self.visualization = LIDAR_PARAMS['visualization']
 
-    def set_lidar(self):
-        self.lidarInterface = _range_sensor.acquire_lidar_sensor_interface()     
-        self.number_lasers = np.floor(self.vertical_fov/self.vertical_resolution).astype(int)+1
-        self.physics_step = 0.0
-        self.current_time = 0.0
-        self.start_time = time.time()
+    def initialize(self, vehicle):
+        """
+        Initialize the Lidar sensor
+        """
+        super().initialize(vehicle)
+        self.update_config()
 
+        # Initialize deep point data frame
+        self.reset()
+
+        # Get lidar instance
         result, lidar = omni.kit.commands.execute(
             "RangeSensorCreateLidar",
             path=self.lidarPath,
@@ -116,74 +112,70 @@ class RotatingLidar():
         self.lidar_prim.GetAttribute("xformOp:rotateXYZ").Set(Gf.Vec3d(self.orientation[0], 
                                                                        self.orientation[1], 
                                                                        self.orientation[2]))
-        # from omni.isaac.core.prims import XFormPrim
-        # from scipy.spatial.transform import Rotation as R
-        # lidar_prim = XFormPrim(prim_path=self.lidar_path)
-        # rotation_downward = R.from_euler('y', -90, degrees=True).as_quat()
-        # translation, _ = lidar_prim.get_local_pose()  
-        # lidar_prim.set_local_pose(translation, rotation_downward) 
-        
-        # set up the frame
-        self._current_frame = dict()
-        self._current_frame["time"] = 0
-        self._current_frame["physics_step"] = 0
-        self._current_frame["point_cloud"] = None
-        self._current_frame["intensity"] = None
-        self._current_frame["depth"] = None
-        
-        return
     
-    def get_lidar_data(self, step_size: float):
-        # self.physics_step += 1
-        # self.time = time.time() - self.current_time
-        
-        # depth_points = np.empty((0,self.number_lasers,3))
-        self.depth_points = self.lidarInterface.get_point_cloud_data(self.lidar_path)
-        self.depth_points = np.squeeze(self.depth_points)
+    def get_lidar_data(self, time_step: float):
+        # depth_points has a shape of (0,self.number_lasers,3) as a placeholder for the lidar data
+        self.depth_points = self.lidarInterface.get_point_cloud_data(self._stage_prim_path) 
+        self.depth_points = torch.tensor(self.depth_points, dtype=torch.float32).view(-1, 3) 
 
         if self.physics_step % self.accumulate_step_length:
-            self.temporary_point_clouds = np.append(self.temporary_point_clouds, self.depth_points.reshape(-1,3), axis=0)
-        else:
-            self.accumulated_point_clouds = self.temporary_point_clouds
-            self.temporary_point_clouds = np.empty(shape=(0,3))
+            # self.temporary_point_clouds = np.append(self.temporary_point_clouds, self.depth_points.reshape(-1,3), axis=0)
+            self.temporary_point_clouds = torch.cat(
+                (self.temporary_point_clouds, self.depth_points), dim=0)
+        else: # exact division
+            self.accumulated_point_clouds = self.temporary_point_clouds.clone()
+            self.temporary_point_clouds = torch.empty((0, 3), dtype=torch.float32)
 
-        # type: numpy narray; shape: point_num, laser_num, coordinate
-        
-
+        # type: torch.tensor; shape: point_num, laser_num, coordinate
         if (self.physics_step % self.accumulate_step_length == 0) and self.visualization:
-            if self.depth_points.shape[-1]==3 and self.depth_points.shape[0]!=0:
+            if self.accumulated_point_clouds.size(0) != 0:
                 point_cloud = o3d.geometry.PointCloud()
-                point_cloud.points = o3d.utility.Vector3dVector(self.accumulated_point_clouds)
-                # point_cloud.points = o3d.utility.Vector3dVector(depth_points.reshape(-1,3))
+                point_cloud.points = o3d.utility.Vector3dVector(self.accumulated_point_clouds.numpy())
                 # visualize the point cloud
                 o3d.visualization.draw_geometries([point_cloud])
         
-        self._data_acquisition_callback(step_size)
+        self._data_acquisition_callback(time_step)
 
-        return
     
-    def _data_acquisition_callback(self, step_size: float) -> None:
+    def _data_acquisition_callback(self, time_step: float):
         '''
-        step_size is the time consumption in each simulation loop
+        time_step is the time consumption in each simulation loop
         '''
-        self.current_time += step_size
+        self.total_time += time_step
         self.physics_step += 1
         
-        self._current_frame["intensity"] = self.lidarInterface.get_intensity_data(self.lidar_path)
-        self._current_frame["depth"] = self.lidarInterface.get_depth_data(self.lidar_path)
+        # self._current_frame["intensity"] = self.lidarInterface.get_intensity_data(self.lidar_path)
+        # self._current_frame["depth"] = self.lidarInterface.get_depth_data(self.lidar_path)
+        # self._current_frame["physics_step"] = self.physics_step
+        # self._current_frame["time"] = self.total_time
+        # self._current_frame["point_cloud"] = self.depth_points
+        self._current_frame["intensity"] = torch.tensor(
+            self.lidarInterface.get_intensity_data(self._stage_prim_path), dtype=torch.float32)
+        self._current_frame["depth"] = torch.tensor(
+            self.lidarInterface.get_depth_data(self._stage_prim_path), dtype=torch.float32)
         self._current_frame["physics_step"] = self.physics_step
-        self._current_frame["time"] = self.current_time
+        self._current_frame["time"] = self.total_time
         self._current_frame["point_cloud"] = self.depth_points
 
-        # if False:
-            # print("current_frame intensity: ", self._current_frame["intensity"])
-            # print("current_frame depth: ", self._current_frame["depth"])
-            # print("current_frame physics_step: ", self._current_frame["physics_step"])
-            # print("current_frame time: ", self._current_frame["time"])
-            # print("current_frame LiDar data: ", self.depth_points[:5])
-            # print("current_frame LiDar data shape: ", self.depth_points.shape)
-            # print("LiDar semantics: ", self.semantics[:5])
-        return
+
+    @GraphicalSensor.update_at_rate
+    def update(self, state: State, dt: float):
+        """Method that gets the data from the lidar and returns it as a dictionary.
+
+        Args:
+            state (State): The current state of the vehicle.
+            dt (float): The time elapsed between the previous and current function calls (s).
+
+        Returns:
+            (dict) A dictionary containing the current state of the sensor (the data produced by the sensor)
+        """
+
+        self.get_lidar_data(dt)
+        # Just return the prim path and the name of the lidar
+        # self._state = {"lidar_name": self._lidar_name, "stage_prim_path": self._stage_prim_path}
+
+        return self._current_frame
+
 
     def check_config(self):
         if self.lidar_prim:
@@ -215,55 +207,32 @@ class RotatingLidar():
         del self._current_frame["depth"]
         return
 
-    def resume(self) -> None:
-        self._pause = False
-        return
+    @property
+    def data(self):
+        """
+        (dict) The 'state' of the sensor, i.e. the data produced by the sensor at any given point in time
+        """
+        return self._current_frame
+    
+    @property
+    def info(self):
+        """
+        (dict) The 'information' of the sensor, i.e. the name, path and configuration of the sensor
+        """
+        self._info = {"lidar_name": self._lidar_name, "stage_prim_path": self._stage_prim_path, "configuration": LIDAR_PARAMS}
 
-    def pause(self) -> None:
-        self._pause = True
-        return
+        return self._info
 
-    def is_paused(self) -> bool:
-        return self._pause
+    def reset(self):
+        """Method that when implemented, should handle the reset of the vehicle simulation to its original state
+        """
+        self.total_time = 0.0
+        self.physics_step = 0.0
 
-    # def setup_lidars(self, scene):
-    #     self.omni_lidar = scene.add(
-    #         RotatingLidarPhysX(
-    #             prim_path="/World/envs/env_0/Crazyflie/body/lidar", 
-    #             name="lidar", 
-    #             translation=np.array([0.0, 0.0, 0.05]),
-    #             fov = (360.0, 45.0),
-    #             resolution = (1.0, 5.0)
-    #         )
-    #     )
-    #     self.omni_lidar.add_depth_data_to_frame()
-    #     self.omni_lidar.add_point_cloud_data_to_frame()
-    #     self.omni_lidar.enable_visualization()
-    #     return
-
-    # def get_pointcloud(self):
-    #     # Retrieve the point cloud data from the annotator
-        
-    #     point_cloud_frame = self.omni_lidar.get_current_frame()
-    #     point_cloud_data = point_cloud_frame['point_cloud']
-    #     # print("LiDar frame: ", type(point_cloud_frame))
-    #     # print("LiDar data: ", type(point_cloud_data))
-        
-    #     if point_cloud_data is not None:
-    #         print("Frame keys: ", point_cloud_frame.keys())
-    #         print("Key time: ", point_cloud_frame['time'])
-    #         print("Key physics_step: ", point_cloud_frame['physics_step'])
-    #         print("Key depth: ", point_cloud_frame['depth'][:5])
-    #         print("Key point_cloud: ", point_cloud_frame['point_cloud'][:5])
-
-    #         self.accumulated_point_clouds = np.append(self.accumulated_point_clouds, np.squeeze(point_cloud_data), axis=0)
-    #         # 
-    #         if point_cloud_frame['physics_step']%1==0:
-    #             point_cloud = o3d.geometry.PointCloud()
-    #             point_cloud.points = o3d.utility.Vector3dVector(self.accumulated_point_clouds)
-    #             self.accumulated_point_clouds = np.empty(shape=(0,3))
-
-    #             # visualize the point cloud
-    #             o3d.visualization.draw_geometries([point_cloud])
-
-    #     return point_cloud_data
+        # set up the frame
+        self._current_frame = dict()
+        self._current_frame["time"] = torch.tensor(0.0, dtype=torch.float32)  
+        self._current_frame["physics_step"] = torch.tensor(0, dtype=torch.int32)  
+        self._current_frame["point_cloud"] = torch.empty((0, 3), dtype=torch.float32)  
+        self._current_frame["intensity"] = torch.empty(0, dtype=torch.float32)  
+        self._current_frame["depth"] = torch.empty(0, dtype=torch.float32) 

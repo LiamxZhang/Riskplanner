@@ -15,8 +15,8 @@ from scipy.spatial.transform import Rotation
 from omni.isaac.dynamic_control import _dynamic_control
 from utils.state import State
 from utils.task_util import traj_tensor
-from min_snap_traj import SnapTrajectory
-from backend import Backend
+from controller.min_snap_traj import SnapTrajectory
+from controller.backend import Backend
 from configs.configs import CONTROL_PARAMS
 
 
@@ -41,13 +41,18 @@ class NonlinearController(Backend):
         Kr=[3.5, 3.5, 3.5],
         Kw=[0.5, 0.5, 0.5]):
 
+        # Define the dynamic parameters for the vehicle
+        self.m = 1.50   # Mass in Kg
+        self.g = 9.81              # The gravity acceleration ms^-2
+        self._num_rotors = CONTROL_PARAMS['num_rotors']
+
         # Handle input
         self._stage_prefix = stage_prefix
         self.results_files = results_file # Lists used for analysing performance statistics
 
         # The current rotor references [rad/s]
-        self.input_ref = [0.0, 0.0, 0.0, 0.0]
-
+        self.input_ref = torch.tensor([0.0 for i in range(self._num_rotors)], dtype=torch.float32)
+        
         # The current state of the vehicle expressed in the inertial frame (in ENU)
         self.p = torch.zeros(3)                          # The vehicle position
         self.R: Rotation = Rotation.identity()           # The vehicle attitude (stays as Rotation object)
@@ -66,11 +71,6 @@ class NonlinearController(Backend):
         self.Kw = torch.diag(torch.tensor(Kw))
 
         self._vehicle_dc_interface = None
-
-        # Define the dynamic parameters for the vehicle
-        self.m = 1.50   # Mass in Kg
-        self.g = 9.81              # The gravity acceleration ms^-2
-        self._num_rotors = CONTROL_PARAMS['num_rotors']
 
         # Set the initial time for starting when using the built-in trajectory (the time is also used in this case
         # as the parametric value)
@@ -178,7 +178,6 @@ class NonlinearController(Backend):
             A list with the target angular velocities for each individual rotor of the vehicle
         """
         return self.input_ref
-
 
     def update(self, dt: float):
         """
@@ -299,72 +298,6 @@ class NonlinearController(Backend):
         
         return mass
     
-    def get_rotor_relative_positions(self):
-        # Get the rigid body handle of the drone in body frame
-        rb_body = self._vehicle_dc_interface.get_rigid_body(self.drone_stage_prefix + "/body")
-        
-        # Get the rigid body handles for four propellers
-        rotors = [self._vehicle_dc_interface.get_rigid_body(self.drone_stage_prefix + "/m" + str(i+1) + "_prop") for i in range(self._num_rotors)]
-        
-        # Get the relative positions of the four propellers with respect to the body (ignoring rotation)
-        relative_poses = self._vehicle_dc_interface.get_relative_body_poses(rb_body, rotors)
-        
-        # Calculate location information
-        relative_positions = []
-        for i, pose in enumerate(relative_poses):
-            position = pose.p  # p is the translation
-            relative_position = torch.tensor([position.x, position.y, position.z], dtype=torch.float32)
-            relative_positions.append(relative_position)
-            # print(f"Relative position of rotor {i} to body frame: {relative_position}")
-        
-        return relative_positions
-
-    def force_and_torques_to_thrust(self, force=None, torque=None):
-        """
-        Auxiliar method used to get the target angular velocities for each rotor, given the total desired thrust [N] and
-        torque [Nm] to be applied in the multirotor's body frame.
-
-        Note: This method assumes a quadratic thrust curve. This method will be improved in a future update,
-        and a general thrust allocation scheme will be adopted. For now, it is made to work with multirotors directly.
-
-        Args:
-            force (np.ndarray): A vector of the force to be applied in the body frame of the vehicle [N]
-            torque (np.ndarray): A vector of the torque to be applied in the body frame of the vehicle [Nm]
-
-        Returns:
-            list: A list of angular velocities [rad/s] to apply in reach rotor to accomplish suchs forces and torques
-        """
-
-        # Integrate input variables
-        # force_torque = torch.cat([torch.from_numpy(force), torch.from_numpy(torque)])
-        force_torque = torch.cat([force.unsqueeze(0), torque])
-
-        # Get the relative positions of the four propellers with respect to the body
-        self.drone_stage_prefix = self.default_env_path + "/Crazyflie"
-        rel_pos = self.get_rotor_relative_positions()
-
-        # Configuration parameters of propellers
-        cT = 1
-        cM = 1e-6
-        nT = -1*cT
-
-        # Construct allocation matrix A
-        A = torch.zeros(self._num_rotors, force_torque.numel())
-        A = torch.tensor([
-            [cT, cT, cT, cT],
-            [rel_pos[0][1]*cT, rel_pos[1][1]*cT, rel_pos[2][1]*cT, rel_pos[3][1]*cT],
-            [rel_pos[0][0]*nT, rel_pos[1][0]*nT, rel_pos[2][0]*nT, rel_pos[3][0]*nT],
-            [-cM, cM, -cM, cM]
-        ], dtype=torch.float32)
-
-        print("Allocation matrix: ", A)
-        # Compute the target thrust of propellers
-        rotor_thrusts = torch.linalg.solve(A, force_torque)
-
-        print("rotor_thrusts: ", rotor_thrusts)
-
-        return rotor_thrusts
-    
     @staticmethod
     def vee(S):
         """Auxiliary function that computes the 'v' map which takes elements from so(3) to R^3.
@@ -373,7 +306,6 @@ class NonlinearController(Backend):
             S (torch.Tensor): A matrix in so(3)
         """
         return torch.tensor([-S[1, 2], S[0, 2], -S[0, 1]], dtype=S.dtype, device=S.device)
-
 
     def reset_statistics(self):
         # If we received an external trajectory, reset the time to 0.0
@@ -387,6 +319,3 @@ class NonlinearController(Backend):
         self.velocity_error_over_time = []
         self.attitude_error_over_time = []
         self.attitude_rate_error_over_time = []
-
-if __name__ == "__main__":
-    controller = NonlinearController()

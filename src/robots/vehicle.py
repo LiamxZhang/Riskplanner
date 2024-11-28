@@ -1,9 +1,4 @@
 # Numerical computations
-import sys
-from pathlib import Path
-current_file_path = Path(__file__).resolve().parent
-sys.path.append(str(current_file_path.parent))
-
 import torch
 
 # Low level APIs
@@ -20,6 +15,10 @@ from omni.isaac.dynamic_control import _dynamic_control
 from omni.isaac.core.articulations import Articulation
 
 # Extension APIs
+import sys
+from pathlib import Path
+current_file_path = Path(__file__).resolve().parent
+sys.path.append(str(current_file_path.parent))
 from utils.state import State
 from envs.isaacgym_env import QuadrotorIsaacSim
 
@@ -168,6 +167,15 @@ class Vehicle(Robot):
         """
         return self._vehicle_name
 
+    @property
+    def stage_prefix(self) -> str:
+        """Stage prefix.
+
+        Returns:
+            Stage prefix path (str): The stage prefix path of current vehicle
+        """
+        return self._stage_prefix
+    
     """
     Operations
     """

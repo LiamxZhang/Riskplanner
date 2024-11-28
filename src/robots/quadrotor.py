@@ -4,7 +4,6 @@ from typing import Optional
 # Isaac sim APIs
 import carb
 import torch
-
 from omni.isaac.core.utils.nucleus import get_assets_root_path
 
 # Extension APIs
@@ -16,6 +15,10 @@ from robots.vehicle import Vehicle
 from robots.thrusters.quadratic_thrust_curve import QuadraticThrustCurve
 from robots.dynamics.linear_drag import LinearDrag
 from configs.configs import CONTROL_PARAMS
+from envs.isaacgym_env import QuadrotorIsaacSim
+
+# when self.prim_grid is needed, it can be accessed from 
+# self.prim_grid = QuadrotorIsaacSim().prim_grid
 
 
 def complete_usd_path(usd_file: str) -> str:
@@ -53,7 +56,6 @@ class Quadrotor(Vehicle):
     ) -> None:
         
         # Set properties
-        self._stage_prefix = stage_prefix
         self._usd_path = complete_usd_path(usd_path)
         self._name = name
         
