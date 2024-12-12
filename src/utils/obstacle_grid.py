@@ -7,10 +7,10 @@ sys.path.append(str(current_file_path.parent))
 from utils.task_util import print_prim_and_grid
 
 
-class ObstacleGridMap:
+class ObstacleGrid:
     def __init__(self,gr):
         """
-        Initialize the ObstacleGridMap class
+        Initialize the ObstacleGrid class
         gr (float): The grid resolution of the map
         """
         # prim_grid is a dictionary where the key is a 3D position, and the value is the prim name

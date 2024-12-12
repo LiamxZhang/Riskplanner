@@ -3,9 +3,17 @@
 import math
 import time
 import carb
-import numpy as np
 from threading import Lock
 import torch
+
+try:
+    import trimesh
+except ImportError as e:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "conda", "install", "-y", "trimesh", "rtree"])
+    import trimesh
+    
+from scipy.spatial import Delaunay
 
 import omni
 from omni.isaac.kit import SimulationApp
@@ -18,8 +26,8 @@ import sys
 from pathlib import Path
 current_file_path = Path(__file__).resolve().parent
 sys.path.append(str(current_file_path.parent))
-from utils.obstacle_grid import ObstacleGridMap
-from utils.task_util import point_to_plane_distance, print_prim_and_grid, is_masked
+from utils.obstacle_grid import ObstacleGrid
+from utils.task_util import is_masked
 from configs.configs import APP_SETTINGS, MAP_ASSET, WORLD_SETTINGS, CONTROL_PARAMS
 
 class QuadrotorIsaacSim:
@@ -139,16 +147,18 @@ class QuadrotorIsaacSim:
             gr (float): grid resolution. 
             dt (float): time step during each simulation cycle. 
         """
-        self.masked_prims = ['Looks','Meshes','Lighting','Road','Buildings','Pavement',
-                        'GroundPlane','TrafficLight','Bench','Tree','TableChair',
-                        'Billboard','Lamp','RoadBarriers','Booth','Umbrella','Camera']
+        # self.masked_prims = ['Looks','Meshes','Lighting','Road','Buildings','Pavement',
+        #                 'GroundPlane','TrafficLight','Bench','Tree','TableChair',
+        #                 'Billboard','Lamp','RoadBarriers','Booth','Umbrella','Camera']
+        
+        self.masked_prims = ['Looks','Light','Floor','Towel_Room01','GroundPlane']
         # for grid map
         self.stage = omni.usd.get_context().get_stage()
         self.length_unit = self.stage.GetMetadata('metersPerUnit')
         self.grid_resolution = gr / self.length_unit # number is in meter; less than 1.0 and can divide 1.0
 
         # 
-        self.prim_grid = ObstacleGridMap(self.grid_resolution)
+        self.prim_grid = ObstacleGrid(self.grid_resolution)
         # Initiate the interface to access convex mesh data
         from omni.physx import get_physx_cooking_interface, get_physx_interface
         get_physx_interface().force_load_physics_from_usd()
@@ -177,7 +187,7 @@ class QuadrotorIsaacSim:
             return timestep
         
         return 0
-
+    
     def is_collided_with_prim(self, prim, point, threshold=None):
         """
         Judge whether the point collides with the prim
@@ -198,38 +208,27 @@ class QuadrotorIsaacSim:
         if threshold is None: # set the deault value
             threshold = 1e-4 / self.length_unit
 
-        # distances_flags = []
         for hull_index in range(num_convex_hulls):
             convex_hull_data = self.cooking_interface.get_convex_mesh_data(prim_path, hull_index)
             # get vertices & polygons
             vertices = convex_hull_data["vertices"]
-            polygons = convex_hull_data["polygons"]
             
-            # For each polygon of hull
-            for poly_index in range(convex_hull_data["num_polygons"]):
-                index_base = polygons[poly_index]["index_base"]
-                poly_world_vertex = []
-
-                # collect all vertices of polygon
-                for vertex_index in range(polygons[poly_index]["num_vertices"]):
-                    current_index = convex_hull_data["indices"][index_base + vertex_index]
-                    # vert =  np.fromiter(vertices[current_index], dtype=np.float32)
-                    vert = torch.tensor(vertices[current_index], dtype=torch.float32)
-                    # vertex_world = transform_matrix.Transform(Gf.Vec3d(vert[0],vert[1],vert[2]))
-                    vertex_world = transform_matrix.Transform(Gf.Vec3d(vert[0].item(), vert[1].item(), vert[2].item()))
-                    # poly_world_vertex.append(vertex_world)
-                    poly_world_vertex.append(torch.tensor([vertex_world[0], vertex_world[1], vertex_world[2]], dtype=torch.float32))
-
-                # print("poly_world_vertex: ", poly_world_vertex)
-                distance, is_inside_poly = point_to_plane_distance(point, poly_world_vertex)
-                if distance<=threshold and is_inside_poly:
-                    return True
-                # distances_flags.append((distance,is_inside_poly))
-                
-        # min_distance, inside_poly = min(distances_flags, key=lambda x: x[0])
-        # print("min_distance: ", min_distance, "inside_poly?: ", inside_poly)
+            vertex_world_list = []
+            for vertex in vertices:
+                vert = torch.tensor(vertex, dtype=torch.float32)
+                vertex_world = transform_matrix.Transform(Gf.Vec3d(vert[0].item(), vert[1].item(), vert[2].item()))
+                vertex_world_list.append([vertex_world[0], vertex_world[1], vertex_world[2]])
+            
+            # print(f"vertex_world_list: {vertex_world_list}")
+            hull = Delaunay(vertex_world_list)
+            mesh = trimesh.Trimesh(vertices=vertex_world_list, faces=hull.simplices)
+            # distance = mesh.nearest.signed_distance([point]) # another slower method
+            closest_point, distance, _ = trimesh.proximity.closest_point(mesh, [point])
+            if distance<=threshold:
+                # print(f"Distance: {distance}, between {point} and closest point: {closest_point}")
+                return True
         return False
-    
+
     def get_bounding_box(self, prim):
         """ return min and max coordinates of bounding box in centimeter unit"""
         from pxr import UsdGeom, Usd, Gf
@@ -281,9 +280,9 @@ class QuadrotorIsaacSim:
             # check whether prim_path is masked
             if is_masked(prim_path, self.masked_prims):
                 continue
-
+            
             num_convex_hulls = self.cooking_interface.get_nb_convex_mesh_data(prim_path)
-
+            
             if num_convex_hulls > 0:
                 min_bbox, max_bbox = self.get_bounding_box(prim)
                 x_range = torch.arange(math.floor(min_bbox[0] / gr) * gr, math.ceil(max_bbox[0] / gr) * gr + gr, gr).tolist()
@@ -293,8 +292,8 @@ class QuadrotorIsaacSim:
                 for x in x_range:
                     for y in y_range:
                         for z in z_range:
-                            point = torch.tensor([x, y, z], dtype=torch.float32)
-                            if self.is_collided_with_prim(prim, point, gr/2):
+                            # point = torch.tensor([x, y, z], dtype=torch.float32)
+                            if self.is_collided_with_prim(prim, [x, y, z], gr/2):
                                 self.prim_grid.add((x, y, z), prim)
                 # print("Prim: ", prim)
                 # print("Prim position: ", self.prim_position)

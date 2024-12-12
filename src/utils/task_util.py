@@ -79,6 +79,58 @@ def point_to_plane_distance(point, poly_world_vertex):
 
     return distance, is_inside
 
+import trimesh
+def point_to_polygon_distance(point, poly_world_vertex):
+    """
+    Calculate the distance from point to polygon in 3D space
+    point: list, include the coordinate (x, y, z)
+    poly_world_vertex: contain point list, all vertices of the plane
+    """
+    # Create the mesh
+    n = len(poly_world_vertex)
+    if n < 3:
+        return float('inf')
+    
+    faces = []
+    # Starting from the 0th vertex, connect the other vertices in sequence to form a triangle
+    for i in range(1, n-1):
+        face = [0, i, i+1]
+        faces.append(face)
+    mesh = trimesh.Trimesh(vertices=poly_world_vertex, faces=faces)
+
+    # calculate the distance from point to mesh
+    distance = mesh.nearest.signed_distance(point)
+    return distance
+
+import matplotlib.pyplot as plt
+def plot_3d_points(points_plot):
+    """
+    Plot a list of 3D points in space.
+
+    Args:
+    points_plot (list): A list of lists, where each sublist contains 3D points [x, y, z].
+    """
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Separate the x, y, and z coordinates
+    x = [point[0] for point in points_plot]
+    y = [point[1] for point in points_plot]
+    z = [point[2] for point in points_plot]
+    
+    # Plot the points
+    ax.scatter(x, y, z, label="Points Group", alpha=0.6)
+
+    # Add labels and legends
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.legend()
+    ax.grid(True)
+
+    plt.show()
+
+
 def print_prim_and_grid(prim_grid):
     from collections import defaultdict
     grouped_grid = defaultdict(list)

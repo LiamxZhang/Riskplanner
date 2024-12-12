@@ -35,7 +35,7 @@ ROBOT_PARAMS = {
 
 # Define the parameters for the robot controller and planner
 CONTROL_PARAMS = {
-    "grid_resolution": 1.0,
+    "grid_resolution": 0.2,
     "control_cycle": 0.5,   # valid min 0.06, but effective min 0.5
     "num_rotors": 4,
 }
