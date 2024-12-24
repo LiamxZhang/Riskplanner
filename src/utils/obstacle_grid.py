@@ -71,7 +71,7 @@ class ObstacleGrid:
         """
         Get the prim path name at a map grid around input position point
         Args:
-            position: A 3D position tuple
+            position: A 3D position tuple in real coordinates
         Return: 
             The name of the prim path or None if not found
         """

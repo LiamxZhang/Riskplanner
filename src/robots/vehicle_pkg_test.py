@@ -2,7 +2,7 @@ import sys
 sys.path.append("..")
 
 from envs.isaacgym_env import QuadrotorIsaacSim
-
+from configs.configs import ROBOT_PARAMS
 QIS = QuadrotorIsaacSim()
 
 # Crazyflie USD file
@@ -11,7 +11,8 @@ assets_root_path = get_assets_root_path()
 # usd_path = assets_root_path + "/Isaac/Robots/Crazyflie/cf2x.usd"
 
 # Iris USD file
-usd_path = "omniverse://localhost/Library/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Robots/Iris/iris.usd"
+# usd_path = "omniverse://localhost/Library/NVIDIA/Assets/Isaac/4.2/Isaac/Robots/Iris/iris.usd"
+usd_path = ROBOT_PARAMS["usd_path"]
 
 # # Local USD file path
 # import os
@@ -23,7 +24,7 @@ usd_path = "omniverse://localhost/Library/NVIDIA/Assets/Isaac/2023.1.1/Isaac/Rob
 
 from vehicle import Vehicle
 
-vehicle = Vehicle(stage_prefix="/World/envs/Iris_00",usd_path = usd_path, scale=[1.0,1.0,1.0])
+vehicle = Vehicle(stage_prefix=ROBOT_PARAMS["stage_prefix"],usd_path = usd_path, scale=[1.0,1.0,1.0])
 
 QIS.start()
 

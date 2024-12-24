@@ -20,6 +20,8 @@ from envs.isaacgym_env import QuadrotorIsaacSim
 # when self.prim_grid is needed, it can be accessed from 
 # self.prim_grid = QuadrotorIsaacSim().prim_grid
 
+from controller.nonlinear_controller import NonlinearController
+from map.sense_gridmap import SenseGridMap
 
 def complete_usd_path(usd_file: str) -> str:
     """
@@ -74,6 +76,10 @@ class Quadrotor(Vehicle):
             graphical_sensors=graphical_sensors,
             backends=backends
             )
+        
+    def add_backends(self, backend):
+        self._backends.append(backend)
+        
 
     def update(self, dt: float):
         """
@@ -118,11 +124,16 @@ class Quadrotor(Vehicle):
 
         # Call the update methods in backends
         for backend in self._backends:
-            backend.update(dt)
-
+            if isinstance(backend, NonlinearController):
+                backend.update(dt)
+            if isinstance(backend, SenseGridMap):
+                lidar_dataframe = self._graphical_sensors[0].data
+                backend.update(lidar_dataframe["point_cloud"])
+        
     def update_trajectory(self, points):
-        for backend in self._backends:
-            backend.update_trajectory(points)
+        # for backend in self._backends:
+        #     backend.update_trajectory(points)
+        self._backends[0].update_trajectory(points)
 
     def handle_propeller_visual(self, rotor_number, force: float, articulation):
         """

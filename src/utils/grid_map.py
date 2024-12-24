@@ -1,7 +1,15 @@
+#!/usr/bin/env python
 import torch
 import matplotlib.pyplot as plt
 
-class GridMap:
+import sys
+from pathlib import Path
+current_file_path = Path(__file__).resolve().parent
+sys.path.append(str(current_file_path.parent))
+
+from controller.backend import Backend
+
+class GridMap(Backend):
     """
     A class to create a basic grid map.
     """
@@ -16,6 +24,7 @@ class GridMap:
         """
         self.grid_resolution = grid_resolution
         self._compute_map_size(coords)
+        self.dtype = dtype
 
         # Initialize the grid map
         self.grid_map = torch.zeros(self.gridmap_size, dtype=dtype)
@@ -56,8 +65,10 @@ class GridMap:
 
         if all(0 <= grid_coords[i] < self.gridmap_size[i] for i in range(len(self.gridmap_size))):
             self.grid_map[grid_coords] = element  # Store the element in the grid map
+            return True
         else:
             print(f"Position {position} is out of bounds.")
+            return False
 
     def realmap_to_gridmap_index(self, point):
         """
@@ -134,6 +145,47 @@ class GridMap:
         ax.set_ylabel("Y (m)")
         ax.set_zlabel("Z (m)")
         plt.show()
+
+    def update_state(self, state):
+        """Method that when implemented, should handle the receival of the state of the vehicle using this callback
+
+        Args:
+            state (State): The current state of the vehicle.
+        """
+        self.p = state.position
+        self.R = state.R
+        self.orient = state.orient # as_euler('ZYX', degrees=True)
+        self.v = state.linear_velocity
+        self.w = state.angular_velocity
+
+    def input_reference(self):
+        """Method that when implemented, should return a list of desired angular velocities to apply to the vehicle rotors
+        """
+        return []
+
+    def update(self, dt: float):
+        """Method that when implemented, should be used to update the state of the backend and the information being sent/received
+        from the communication interface. This method will be called by the simulation on every physics step
+
+        Args:
+            dt (float): The time elapsed between the previous and current function calls (s).
+        """
+        pass
+    
+    def start(self):
+        """Method that when implemented should handle the begining of the simulation of vehicle
+        """
+        pass
+
+    def stop(self):
+        """Method that when implemented should handle the stopping of the simulation of vehicle
+        """
+        pass
+    
+    def reset(self):
+        """Method that when implemented, should handle the reset of the vehicle simulation to its original state
+        """
+        pass
 
 
 if __name__ == "__main__":

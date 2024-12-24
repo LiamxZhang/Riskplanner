@@ -18,17 +18,19 @@ controller = NonlinearController(
             )
 
 from sensors.lidar import RotatingLidar
-
 lidar = RotatingLidar()
 
 from robots.quadrotor import Quadrotor
 quadrotor = Quadrotor(**ROBOT_PARAMS, sensors=[], graphical_sensors=[lidar], backends=[controller])
-target = [[1.0, 0, 0.2, 0.0]]
+# Set the vehicle init position as [-1.0, 0.0, 0.2]
+target = [[-0.5, 0, 0.2, 0.0]]
 
 QIS.start()  # get grid map QIS.prim_grid
 
-# every step get lidar._current_frame
+from map.sense_gridmap import SenseGridMap
+sense_gridmap = SenseGridMap()
 
+quadrotor.add_backends(sense_gridmap)
 
 while QIS.is_running():
     print("current simulation time: ", QIS.time)

@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from typing import Optional, Tuple, List
 import open3d as o3d
+from scipy.spatial.transform import Rotation as R
 
 # Isaac sim APIs
 import omni
@@ -65,8 +66,8 @@ class RotatingLidar(GraphicalSensor):
         self.horizontal_fov, self.vertical_fov = LIDAR_PARAMS['fov']
         self.horizontal_resolution, self.vertical_resolution = LIDAR_PARAMS['resolution']
         self.rotation_rate = LIDAR_PARAMS['rotation_rate']
-        self.orientation = LIDAR_PARAMS['orientation']
-        self.translation = LIDAR_PARAMS['translation']
+        self.orientation = torch.tensor(LIDAR_PARAMS['orientation'], dtype=torch.float32)
+        self.translation = torch.tensor(LIDAR_PARAMS['translation'], dtype=torch.float32)
         
         # Flags
         self.draw_lines = LIDAR_PARAMS['draw_lines']
@@ -105,27 +106,27 @@ class RotatingLidar(GraphicalSensor):
         )
 
         self.lidar_prim = lidar.GetPrim()
-        self.lidar_prim.GetAttribute("xformOp:translate").Set(Gf.Vec3d(self.translation[0], 
-                                                                       self.translation[1], 
-                                                                       self.translation[2]))
+        self.lidar_prim.GetAttribute("xformOp:translate").Set(Gf.Vec3d(self.translation[0].item(), 
+                                                                       self.translation[1].item(), 
+                                                                       self.translation[2].item()))
         
-        self.lidar_prim.GetAttribute("xformOp:rotateXYZ").Set(Gf.Vec3d(self.orientation[0], 
-                                                                       self.orientation[1], 
-                                                                       self.orientation[2]))
+        self.lidar_prim.GetAttribute("xformOp:rotateXYZ").Set(Gf.Vec3d(self.orientation[0].item(), 
+                                                                       self.orientation[1].item(), 
+                                                                       self.orientation[2].item()))
     
     def get_lidar_data(self, time_step: float):
         # depth_points has a shape of (0,self.number_lasers,3) as a placeholder for the lidar data
         self.depth_points = self.lidarInterface.get_point_cloud_data(self._stage_prim_path) 
-        self.depth_points = torch.tensor(self.depth_points, dtype=torch.float32).view(-1, 3) 
+        self.depth_points = torch.tensor(self.depth_points, dtype=torch.float32)
 
+        # For visualization
         if self.physics_step % self.accumulate_step_length:
             # self.temporary_point_clouds = np.append(self.temporary_point_clouds, self.depth_points.reshape(-1,3), axis=0)
             self.temporary_point_clouds = torch.cat(
-                (self.temporary_point_clouds, self.depth_points), dim=0)
+                (self.temporary_point_clouds, self.depth_points.view(-1, 3)), dim=0)
         else: # exact division
             self.accumulated_point_clouds = self.temporary_point_clouds.clone()
             self.temporary_point_clouds = torch.empty((0, 3), dtype=torch.float32)
-
         # type: torch.tensor; shape: point_num, laser_num, coordinate
         if (self.physics_step % self.accumulate_step_length == 0) and self.visualization:
             if self.accumulated_point_clouds.size(0) != 0:
@@ -135,7 +136,6 @@ class RotatingLidar(GraphicalSensor):
                 o3d.visualization.draw_geometries([point_cloud])
         
         self._data_acquisition_callback(time_step)
-
     
     def _data_acquisition_callback(self, time_step: float):
         '''
@@ -157,6 +157,51 @@ class RotatingLidar(GraphicalSensor):
         self._current_frame["time"] = self.total_time
         self._current_frame["point_cloud"] = self.depth_points
 
+    def lidar_local2world(self, drone: State):
+        '''
+        Transform the lidar data to world coordinate
+        '''
+        # Rotation matrices
+        drone_rotation_matrix = torch.tensor(
+            R.from_euler('ZYX', drone.orient.tolist(), degrees=False).as_matrix(), 
+            dtype=torch.float32
+            )
+        lidar_rotation_matrix = torch.tensor(
+            R.from_euler('ZYX', self.orientation.tolist(), degrees=False).as_matrix(), 
+            dtype=torch.float32
+            )
+        # print(f"Rotation matrices: {drone_rotation_matrix} and {lidar_rotation_matrix}")
+        
+        # # To show full raw data in world frame
+        # points = self.depth_points.view(-1,3)
+        # lidar_points_in_drone_frame = torch.matmul(
+        #     lidar_rotation_matrix, points.T
+        # ).T + self.translation  # Local to drone frame
+
+        # lidar_data_in_world = torch.matmul(
+        #     drone_rotation_matrix, lidar_points_in_drone_frame.T
+        # ).T + drone.position  # Drone to global frame
+        # print("LiDar raw data shape:",self.depth_points.shape)
+        # print("LiDar raw data: ", lidar_data_in_world)
+
+        # Slice the tensor
+        N = 3
+        _, col, _ = self.depth_points.shape  # Get the width (horizontal resolution)
+        part_col = col * (N - 1) // N  # Starting column index for bottom 1/N
+        # Shape: (H, W/N, 3) -> Shape: (H*W/N, 3)
+        lidar_data_part = self.depth_points[:, part_col:, :].contiguous().view(-1, 3)   
+
+        # Batch processing: transform all points at once
+        lidar_points_in_drone_frame = torch.matmul(
+            lidar_rotation_matrix, lidar_data_part.T
+        ).T + self.translation  # Local to drone frame
+        self.lidar_data_in_world = torch.matmul(
+            drone_rotation_matrix, lidar_points_in_drone_frame.T
+        ).T + drone.position  # Drone to global frame
+        self._current_frame["point_cloud"] = self.lidar_data_in_world
+        # print("Sliced LiDar data shape: ", self.lidar_data_in_world.shape)
+        # print("LiDAR data in world frame: ", self.lidar_data_in_world)
+        
 
     @GraphicalSensor.update_at_rate
     def update(self, state: State, dt: float):
@@ -173,6 +218,7 @@ class RotatingLidar(GraphicalSensor):
         self.get_lidar_data(dt)
         # Just return the prim path and the name of the lidar
         # self._state = {"lidar_name": self._lidar_name, "stage_prim_path": self._stage_prim_path}
+        self.lidar_local2world(state)
 
         return self._current_frame
 

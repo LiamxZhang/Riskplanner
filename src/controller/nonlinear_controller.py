@@ -42,8 +42,8 @@ class NonlinearController(Backend):
         Kw=[0.5, 0.5, 0.5]):
 
         # Define the dynamic parameters for the vehicle
-        self.m = 1.50   # Mass in Kg
-        self.g = 9.81              # The gravity acceleration ms^-2
+        self.m = CONTROL_PARAMS['mass']      # Mass in Kg
+        self.g = CONTROL_PARAMS['gravity']   # The gravity acceleration ms^-2
         self._num_rotors = CONTROL_PARAMS['num_rotors']
 
         # Handle input
@@ -52,7 +52,7 @@ class NonlinearController(Backend):
 
         # The current rotor references [rad/s]
         self.input_ref = torch.tensor([0.0 for i in range(self._num_rotors)], dtype=torch.float32)
-        
+
         # The current state of the vehicle expressed in the inertial frame (in ENU)
         self.p = torch.zeros(3)                          # The vehicle position
         self.R: Rotation = Rotation.identity()           # The vehicle attitude (stays as Rotation object)
@@ -131,8 +131,7 @@ class NonlinearController(Backend):
         self.w = state.angular_velocity
 
         self.received_first_state = True
-        carb.log_warn(f"state.position is: {self.p}")
-
+    
     def update_trajectory(self, points):
         """
         Generate waypoints based on current state and path points.
@@ -198,7 +197,7 @@ class NonlinearController(Backend):
         self.traj_time += dt
         if self.index < self.max_index - 1 and self.traj_time >= self.time_ref:
             self.index += 1
-        carb.log_warn(f"index is: {self.index}")
+        # carb.log_warn(f"Trajectory index is: {self.index}")
         # Update using an external trajectory
         if self.trajectory is not None:
             p_ref, v_ref, a_ref, j_ref, yaw_ref, yaw_rate_ref, self.time_ref = traj_tensor(self.index, self.trajectory)
@@ -210,7 +209,7 @@ class NonlinearController(Backend):
             yaw_ref = self.orient[2].item()
             yaw_rate_ref = self.w[2].item()
             self.time_ref = 0.0
-        carb.log_warn(f"reference is: {p_ref}, {yaw_ref}, {v_ref}")
+        # carb.log_warn(f"Reference point is: {p_ref}, {yaw_ref}, {v_ref}")
         # -------------------------------------------------
         # Start the controller implementation
         # -------------------------------------------------
@@ -264,7 +263,7 @@ class NonlinearController(Backend):
         
         if self.vehicle:
             self.input_ref = self.vehicle.force_and_torques_to_velocities(u_1, tau)
-        carb.log_warn(f"input_reference is: {self.input_ref}")
+        # carb.log_warn(f"The input_reference is: {self.input_ref}")
         # ----------------------------
         # Statistics to save for later
         # ----------------------------
@@ -319,3 +318,30 @@ class NonlinearController(Backend):
         self.velocity_error_over_time = []
         self.attitude_error_over_time = []
         self.attitude_rate_error_over_time = []
+
+    def reset(self):
+        # The current rotor references [rad/s]
+        self.input_ref = torch.tensor([0.0 for i in range(self._num_rotors)], dtype=torch.float32)
+
+        # The current state of the vehicle expressed in the inertial frame (in ENU)
+        self.p = torch.zeros(3)                          # The vehicle position
+        self.R: Rotation = Rotation.identity()           # The vehicle attitude (stays as Rotation object)
+        self.w = torch.zeros(3)                          # The angular velocity of the vehicle
+        self.v = torch.zeros(3)                          # The linear velocity of the vehicle in the inertial frame
+        self.a = torch.zeros(3)                          # The linear acceleration of the vehicle in the inertial frame
+        self.orient = torch.zeros(3)
+
+        self.int = torch.tensor([0.0, 0.0, 0.0])         # The integral of position error
+        
+        # Set the initial time for starting when using the built-in trajectory (the time is also used in this case
+        # as the parametric value)
+        self.total_time = 0.0
+        self.index = 0
+        # Signal that we will not used a received trajectory
+        self.trajectory = None
+
+        # Auxiliar variable, so that we only start sending motor commands once we get the state of the vehicle
+        self.received_first_state = False
+
+        # Lists used for analysing performance statistics
+        self.reset_statistics()

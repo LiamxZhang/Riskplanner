@@ -109,7 +109,7 @@ class Backend(ABC):
         """
         pass
 
-    # @abstractmethod
+    @abstractmethod
     def reset(self):
         """Method that when implemented, should handle the reset of the vehicle simulation to its original state
         """

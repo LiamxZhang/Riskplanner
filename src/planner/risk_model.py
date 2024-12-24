@@ -57,6 +57,10 @@ class RiskModel:
 
         return risk_cost
 
+
+    def fatality_risk(self):
+        return
+
     def update(self, new_risk_map):
         """
         Update the risk map.

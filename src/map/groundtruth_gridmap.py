@@ -13,10 +13,9 @@ from utils.grid_map import GridMap
 class GroundTruthGridMap(GridMap):
     def __init__(self):
         """
-        Initialize the MapManager class.
+        Initialize the GroundTruthGridMap class.
         """
-        # self.risk_map = torch.zeros(grid_size, dtype=torch.float32)  # Initialize risk values to zero
-        # Get the 
+        # Get the prim_grid entity as well as the dictionary
         prim_grid_class = QuadrotorIsaacSim().prim_grid
         self.prim_grid = prim_grid_class.prim_grid
         self.grid_resolution = prim_grid_class.grid_resolution
@@ -32,14 +31,14 @@ class GroundTruthGridMap(GridMap):
         )
 
         self.prim_categories = {}  # Dictionary that mapping prims to IDs
+        
         # construct the grid map
         for position, prim in self.prim_grid.items(): # position (Tuple), prim (USD.Prim)
             id = self._get_prim_id(prim)
             self._add_to_grid(id, position) # Add a prim to the grid map
         # print(f"Grid map: {self.grid_map}")
-        print(f"Prim categories: {self.prim_categories}")
-
-        self.visualize_scatter()
+        # print(f"Prim categories: {self.prim_categories}")
+        # self.visualize_scatter()
         
     def _get_prim_id(self, prim):
         """

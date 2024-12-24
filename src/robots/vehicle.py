@@ -141,7 +141,7 @@ class Vehicle(Robot):
         for backend in self._backends:
             backend.initialize(self)
 
-        # Add a callbacks for the
+        # Add a callbacks for the backends
         self._world.add_physics_callback(self._stage_prefix + "/Control_state", self.update_sim_state)
 
 
