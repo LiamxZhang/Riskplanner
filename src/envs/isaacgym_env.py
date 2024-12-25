@@ -1,5 +1,6 @@
 # This script setup the isaac sim environment
 #
+import sys
 import math
 import time
 import carb
@@ -10,7 +11,9 @@ try:
     import trimesh
 except ImportError as e:
     import subprocess
-    subprocess.check_call([sys.executable, "-m", "conda", "install", "-y", "trimesh", "rtree"])
+    install_command = [sys.executable, "-m", "pip", "install", "trimesh", "rtree"]
+    result = subprocess.run(install_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print(result.stdout)
     import trimesh
     
 from scipy.spatial import Delaunay
@@ -22,7 +25,6 @@ from omni.isaac.kit import SimulationApp
 #import omni.isaac.core.utils.prims as prims_utils
 
 # Extension APIs
-import sys
 from pathlib import Path
 current_file_path = Path(__file__).resolve().parent
 sys.path.append(str(current_file_path.parent))
@@ -42,7 +44,7 @@ class QuadrotorIsaacSim:
     # Lock for safe multi-threading
     _lock: Lock = Lock()
 
-    def __init__(self, usd_path: str = None):
+    def __init__(self):
         """
         Initialize the QuadrotorIsaacSim environment.
         Args:
@@ -56,6 +58,7 @@ class QuadrotorIsaacSim:
         
         # Create the app
         self.App = SimulationApp(launch_config=APP_SETTINGS)
+        usd_path = MAP_ASSET["usd_path"]
         self.load_task(usd_path)
         time.sleep(2)
         self.init_config(CONTROL_PARAMS['grid_resolution'],CONTROL_PARAMS['control_cycle'])
@@ -273,7 +276,7 @@ class QuadrotorIsaacSim:
         # stage = omni.usd.get_context().get_stage()
 
         gr = self.grid_resolution
-        
+
         # get all prims from the stage
         for prim in self.stage.Traverse():
             prim_path = str(prim.GetPath())

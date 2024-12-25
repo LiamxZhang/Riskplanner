@@ -1,4 +1,14 @@
-import cvxpy as cp
+
+try:
+    import cvxpy as cp
+except ImportError as e:
+    import subprocess
+    import sys
+    install_command = [sys.executable, "-m", "pip", "install", "cvxpy"]
+    result = subprocess.run(install_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print(result.stdout)
+    import cvxpy as cp # May need to restart the program
+
 import numpy as np
 import csv
 import math

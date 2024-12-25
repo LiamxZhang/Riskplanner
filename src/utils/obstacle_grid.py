@@ -1,5 +1,5 @@
 # This script setup the Obstacle Grid Map class
-
+import torch
 import sys
 from pathlib import Path
 current_file_path = Path(__file__).resolve().parent
@@ -16,6 +16,7 @@ class ObstacleGrid:
         # prim_grid is a dictionary where the key is a 3D position, and the value is the prim name
         self._prim_grid = {}
         self.grid_resolution = gr
+        self.coord_accuracy = 3 # realmap coordinate accuracy in decimal
     
     @property
     def prim_grid(self):
@@ -53,6 +54,9 @@ class ObstacleGrid:
         """
         if not (isinstance(position, tuple) and len(position) == 3 and all(isinstance(coord, (int, float)) for coord in position)):
             raise ValueError("Position must be a 3D tuple (x, y, z).")
+        
+        ca = self.coord_accuracy
+        position = tuple(round(num, ca) for num in position)
         if position not in self._prim_grid:
             self._prim_grid[position] = prim_entity
 
@@ -75,11 +79,16 @@ class ObstacleGrid:
         Return: 
             The name of the prim path or None if not found
         """
+        if isinstance(point, torch.Tensor):
+            point = tuple(point.tolist())
+            
         gr = self.grid_resolution
+        ca = self.coord_accuracy
+
         grid_coord = (
-            round(point[0] / gr) * gr,
-            round(point[1] / gr) * gr,
-            round(point[2] / gr) * gr
+            round(round(point[0] / gr) * gr, ca),
+            round(round(point[1] / gr) * gr, ca),
+            round(round(point[2] / gr) * gr, ca)
         )
         # print("grid_coord: ", grid_coord)
 

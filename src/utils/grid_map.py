@@ -25,7 +25,7 @@ class GridMap(Backend):
         self.grid_resolution = grid_resolution
         self._compute_map_size(coords)
         self.dtype = dtype
-
+        
         # Initialize the grid map
         self.grid_map = torch.zeros(self.gridmap_size, dtype=dtype)
 
@@ -41,17 +41,19 @@ class GridMap(Backend):
             min_bounds = coords.min(dim=0).values 
             max_bounds = coords.max(dim=0).values + self.grid_resolution
             self.realmap_bounds = torch.stack([min_bounds, max_bounds]) # Shape: [2, 3]
-            self.realmap_size = (max_bounds - min_bounds).tolist() 
+            self.realmap_size = (max_bounds - min_bounds).tolist() # Type: list
             # print(f"Realmap bounds: {self.realmap_bounds}")
             # print(f"Realmap size: {self.realmap_size}")
 
             # Grid map size
             grid_min_bounds = torch.floor(min_bounds / self.grid_resolution)
             grid_max_bounds = torch.ceil(max_bounds / self.grid_resolution)
-            self.gridmap_bounds = torch.stack([grid_min_bounds, grid_max_bounds])  # Shape: [2, 3]
-            self.gridmap_size = (grid_max_bounds - grid_min_bounds).to(torch.int32).tolist() 
+            self.gridmap_size = (grid_max_bounds - grid_min_bounds).to(torch.int32).tolist() # Type: list
+            self.gridmap_bounds = torch.tensor([[0, 0, 0], self.gridmap_size], dtype=torch.float32)  # Shape: [2, 3]
             # print(f"Gridmap bounds: {self.gridmap_bounds}")
             # print(f"Gridmap size: {self.gridmap_size}")
+
+            self.realmap_bounds_grided = torch.stack([grid_min_bounds, grid_max_bounds])  # Shape: [2, 3]
     
     def _add_to_grid(self, element, position):
         """

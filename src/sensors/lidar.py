@@ -7,8 +7,16 @@
 import numpy as np
 import torch
 from typing import Optional, Tuple, List
-import open3d as o3d
 from scipy.spatial.transform import Rotation as R
+import sys
+try:
+    import open3d as o3d
+except ImportError as e:
+    import subprocess
+    install_command = [sys.executable, "-m", "pip", "install", "open3d"]
+    result = subprocess.run(install_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print(result.stdout)
+    import open3d as o3d # May need to restart the program
 
 # Isaac sim APIs
 import omni
@@ -18,7 +26,6 @@ from omni.usd import get_stage_next_free_path
 from pxr import Gf, PhysicsSchemaTools, Sdf, Semantics, UsdGeom, UsdLux, UsdPhysics
 
 # Extension APIs
-import sys
 from pathlib import Path
 current_file_path = Path(__file__).resolve().parent
 sys.path.append(str(current_file_path.parent))
@@ -185,7 +192,7 @@ class RotatingLidar(GraphicalSensor):
         # print("LiDar raw data: ", lidar_data_in_world)
 
         # Slice the tensor
-        N = 3
+        N = 1
         _, col, _ = self.depth_points.shape  # Get the width (horizontal resolution)
         part_col = col * (N - 1) // N  # Starting column index for bottom 1/N
         # Shape: (H, W/N, 3) -> Shape: (H*W/N, 3)

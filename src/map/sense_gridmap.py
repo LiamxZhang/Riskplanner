@@ -63,15 +63,14 @@ class SenseGridMap(GridMap):
         Args:
             lidar_data (torch.tensor): A tensor of shape (N, 3) containing LiDAR-detected 3D points.
         """
-        for point in lidar_data:            
+        for point in lidar_data:        
             # Convert real-world position to grid coordinates
             grid_index = self.realmap_to_gridmap_index(point)
-            print("grid_index: ", grid_index)
-            print("self.realmap_bounds: ", self.realmap_bounds)
+            # print("grid_index: ", grid_index)
             if not all(0 <= grid_index[i] < self.gridmap_size[i] for i in range(len(grid_index))):
                 continue  # Jump over the outlier points
-            print("self.grid_updated[grid_index]: ", self.grid_updated[grid_index])
-            if self.grid_updated[grid_index]:
+            
+            if self.grid_updated[grid_index].item() > 0:
                 continue # Jump over the points that have been updated recently
             
             # Get the prim entity at the index
@@ -86,7 +85,7 @@ class SenseGridMap(GridMap):
 
         # Decrement all values in self.grid_updated by 1, with a minimum of 0
         self.grid_updated = torch.maximum(self.grid_updated - 1, torch.tensor(0, dtype=torch.int32))
-        print("self.grid_updated: ", self.grid_updated)
+        # print("self.grid_updated: ", self.grid_updated)
         if not torch.all(self.grid_updated==0):
             self.visualize_scatter()
     
