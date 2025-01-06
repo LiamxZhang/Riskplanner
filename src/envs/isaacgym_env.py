@@ -166,7 +166,7 @@ class QuadrotorIsaacSim:
         from omni.physx import get_physx_cooking_interface, get_physx_interface
         get_physx_interface().force_load_physics_from_usd()
         self.cooking_interface = get_physx_cooking_interface()
-
+        
         # Initiate the timer parameters
         self.timestep_threshold = dt
         self.previous_simulation_time = 0.0
@@ -328,17 +328,16 @@ class QuadrotorIsaacSim:
         QuadrotorIsaacSim._is_initialized = False
 
 if __name__ == "__main__":
-    CONFIG = {"app":{"width": 1280, "height": 720, "sync_loads": True, "headless": False, "renderer": "RayTracedLighting"},
-              "usd_path": None,
-              "grid_resolution": 1.0,
-              "control_cycle": 0.1 
-              }
+    # CONFIG = {"app":{"width": 1280, "height": 720, "sync_loads": True, "headless": False, "renderer": "RayTracedLighting"},
+    #           "usd_path": None,
+    #           "grid_resolution": 1.0,
+    #           "control_cycle": 0.1 
+    #           }
     QIS = QuadrotorIsaacSim()
     
     QIS.start()
     
     while QIS.is_running():
         # print("current simulation time: ", QIS.time)
-        
         QIS.update()
     QIS.stop()
