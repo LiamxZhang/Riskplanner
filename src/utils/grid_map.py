@@ -8,12 +8,15 @@ current_file_path = Path(__file__).resolve().parent
 sys.path.append(str(current_file_path.parent))
 
 from controller.backend import Backend
+from configs.configs import MAP_ASSET
+from ros2.point_publish_node import PointPublisher
+
 
 class GridMap(Backend):
     """
     A class to create a basic grid map.
     """
-    def __init__(self, grid_resolution, coords, dtype = torch.float32):
+    def __init__(self, grid_resolution, coords, dtype = torch.float32, map_name = "gridmap"):
         """
         Convert 3D real-map coordinates to grid map indices.
         Args:
@@ -25,9 +28,17 @@ class GridMap(Backend):
         self.grid_resolution = grid_resolution
         self._compute_map_size(coords)
         self.dtype = dtype
-        
+        self.all_points = torch.empty((0, 3))
+        self.points_max_length = int(1e9)
+
         # Initialize the grid map
         self.grid_map = torch.zeros(self.gridmap_size, dtype=dtype)
+
+        if MAP_ASSET["ros2_publish"]:
+            # Create MapPublisher node
+            node_name = map_name + "_publish_node"
+            topic_name = "/" + map_name + "/points"
+            self.lidar_publisher = PointPublisher(node_name, topic_name)
 
     def _compute_map_size(self, coords):
         """
@@ -62,11 +73,21 @@ class GridMap(Backend):
             element (float or int): The number reprensenting the model or object.
             position (tuple): The 3D real position of the element.
         """
+        if isinstance(position, torch.Tensor):
+            position = position.clone().detach()
+        else:
+            position = torch.tensor(position, dtype=torch.float32)
+
         # Convert position to grid coordinates
         grid_coords = self.realmap_to_gridmap_index(position) # tuple
 
         if all(0 <= grid_coords[i] < self.gridmap_size[i] for i in range(len(self.gridmap_size))):
             self.grid_map[grid_coords] = element  # Store the element in the grid map
+
+            position_tensor = position.unsqueeze(0)
+            self.all_points = torch.cat((self.all_points, position_tensor), dim=0)
+            if self.all_points.size(0) > self.points_max_length:
+                self.all_points = self.all_points[-self.points_max_length:]
             return True
         else:
             print(f"Position {position} is out of bounds.")
@@ -80,7 +101,11 @@ class GridMap(Backend):
         Returns:
             indices (tuple): A tuple of shape (3) containing grid indices for each point.
         """
-        grid_index = torch.floor((torch.tensor(point) - self.realmap_bounds[0]) / self.grid_resolution).to(torch.int32)
+        if isinstance(point, torch.Tensor):
+            processed_point = point.clone().detach()
+        else:
+            processed_point = torch.tensor(point, dtype=torch.float32)
+        grid_index = torch.floor((processed_point - self.realmap_bounds[0]) / self.grid_resolution).to(torch.int32)
         return tuple(grid_index)
     
     def gridmap_to_realmap_index(self, grid_index):
@@ -91,9 +116,20 @@ class GridMap(Backend):
         Returns:
             real_pos (tuple): A tuple of shape (3) containing 3D points.
         """
-        real_pos = torch.tensor(grid_index) * self.grid_resolution + self.realmap_bounds[0]
+        if isinstance(grid_index, torch.Tensor):
+            processed_index = grid_index.clone().detach()
+        else:
+            processed_index = torch.tensor(grid_index, dtype=torch.float32)
+        real_pos = processed_index * self.grid_resolution + self.realmap_bounds[0]
         return tuple(real_pos)
     
+    def pub(self):
+        """
+        Publish all map points to ROS2 topic
+        """
+        if MAP_ASSET["ros2_publish"]:
+            self.lidar_publisher.pub(self.all_points)
+
     def visualize_grid(self):
         """
         Visualize the 3D grid map with a scatter plot.

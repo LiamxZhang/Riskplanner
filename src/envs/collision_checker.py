@@ -1,15 +1,14 @@
-from omni.physx import get_physx_cooking_interface, get_physx_interface
+from omni.physx import get_physx_cooking_interface
 from pxr import UsdGeom, Usd, Gf
 import torch
 import trimesh
 from scipy.spatial import Delaunay
-from omni.usd import UsdUtils  # 必须导入 UsdUtils
-from omni.physx import PhysicsSchemaTools  # 必须导入 PhysicsSchemaTools
-from omni.physx import PhysxCollisionRepresentationResult  # 必须导入 PhysxCollisionRepresentationResult
+import omni.usd 
+from omni.physx import PhysicsSchemaTools 
+from omni.physx import PhysxCollisionRepresentationResult 
 
 class CollisionChecker:
     def __init__(self, stage, length_unit):
-        # 初始化所需的变量
         self._stage = stage
         self.length_unit = length_unit
         self.threshold = None
@@ -37,8 +36,8 @@ class CollisionChecker:
             self.threshold = threshold
 
         # Request convex collision representation
-        physx_cooking = get_physx_cooking_interface()
-        stage_id = UsdUtils.StageCache.Get().GetId(self._stage).ToLongInt()  # Get stage ID
+        physx_cooking = get_physx_cooking_interface()        
+        stage_id = omni.usd.get_context().get_stage_id()
         prim_id = PhysicsSchemaTools.sdfPathToInt(self.prim_path)  # Get prim ID
 
         # Asynchronous request for convex collision representation

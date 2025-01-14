@@ -1,12 +1,10 @@
-#
+#!/usr/bin/env python
 # This script create a customized Lidar sensor
 # based on the range_sensor and 
 # omni.kit.commands.execute of rotating lidar
 
 # Common APIs
-import numpy as np
 import torch
-from typing import Optional, Tuple, List
 from scipy.spatial.transform import Rotation as R
 import sys
 try:
@@ -22,8 +20,8 @@ except ImportError as e:
 import omni
 from omni.isaac.range_sensor import _range_sensor
 from omni.usd import get_stage_next_free_path
-
-from pxr import Gf, PhysicsSchemaTools, Sdf, Semantics, UsdGeom, UsdLux, UsdPhysics
+from pxr import Gf
+# from pxr import Gf, PhysicsSchemaTools, Sdf, Semantics, UsdGeom, UsdLux, UsdPhysics
 
 # Extension APIs
 from pathlib import Path
@@ -34,12 +32,12 @@ from utils.state import State
 from sensors.graphical_sensor import GraphicalSensor
 from envs.isaacgym_env import QuadrotorIsaacSim
 from configs.configs import LIDAR_PARAMS
-
+from ros2.point_publish_node import PointPublisher
 
 class RotatingLidar(GraphicalSensor):
-    def __init__(self):
+    def __init__(self, lidar_name = "lidar"):
         # Setup the name of the camera primitive path
-        self._lidar_name = "lidar"
+        self._lidar_name = lidar_name
         self._stage_prim_path = ""
 
         # Initialize the Super class "object" attributes
@@ -51,6 +49,13 @@ class RotatingLidar(GraphicalSensor):
 
         # Create the lidar interface
         self.lidarInterface = _range_sensor.acquire_lidar_sensor_interface() # Used to interact with the LIDAR
+
+        # Create lidar ros2 publisher
+        if LIDAR_PARAMS["ros2_publish"]:
+            # Create LidarPublisher node
+            node_name = self._lidar_name + "_publish_node"
+            topic_name = "/" + self._lidar_name + "/points"
+            self.lidar_publisher = PointPublisher(node_name, topic_name)
 
 
     def update_config(self):
@@ -192,7 +197,7 @@ class RotatingLidar(GraphicalSensor):
         # print("LiDar raw data: ", lidar_data_in_world)
 
         # Slice the tensor
-        N = 1
+        N = 2
         _, col, _ = self.depth_points.shape  # Get the width (horizontal resolution)
         part_col = col * (N - 1) // N  # Starting column index for bottom 1/N
         # Shape: (H, W/N, 3) -> Shape: (H*W/N, 3)
@@ -208,7 +213,6 @@ class RotatingLidar(GraphicalSensor):
         self._current_frame["point_cloud"] = self.lidar_data_in_world
         # print("Sliced LiDar data shape: ", self.lidar_data_in_world.shape)
         # print("LiDAR data in world frame: ", self.lidar_data_in_world)
-        
 
     @GraphicalSensor.update_at_rate
     def update(self, state: State, dt: float):
@@ -226,6 +230,9 @@ class RotatingLidar(GraphicalSensor):
         # Just return the prim path and the name of the lidar
         # self._state = {"lidar_name": self._lidar_name, "stage_prim_path": self._stage_prim_path}
         self.lidar_local2world(state)
+
+        if LIDAR_PARAMS["ros2_publish"]:
+            self.lidar_publisher.pub(self.lidar_data_in_world)
 
         return self._current_frame
 

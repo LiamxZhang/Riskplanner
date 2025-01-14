@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python
 try:
     import cvxpy as cp
 except ImportError as e:

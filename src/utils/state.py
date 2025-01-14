@@ -1,4 +1,4 @@
-# 
+#!/usr/bin/env python
 import torch
 from scipy.spatial.transform import Rotation
 
@@ -35,8 +35,9 @@ class State:
         self.position = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
 
         # The attitude (orientation) of the vehicle's body frame relative to the inertial frame
-        # The orientation of the vehicle in quaternion [qx, qy, qz, qw]. Defaults to [1.0, 0.0, 0.0, 0.0].
+        # The orientation of the vehicle in quaternion [qx, qy, qz, qw]. Defaults to [0.0, 0.0, 0.0, 1.0].
         self.attitude_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=torch.float32)
+        self.R = Rotation.from_quat(self.attitude_quat.numpy())  # input: [qx, qy, qz, qw]
         self.orient = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
         
         # The linear velocity [u,v,w] of the vehicle's body frame expressed in the body frame
@@ -65,8 +66,8 @@ class State:
         self.position = position.to(dtype=torch.float32)
         
         self.attitude_quat = attitude_quat.to(dtype=torch.float32)
-        self.R = Rotation.from_quat(attitude_quat.numpy())  # input: [qx, qy, qz, qw]
-        self.orient = self.rot_to_euler(self.R)  # output angle order depends on euler_order: z,y,x
+        self.R = Rotation.from_quat(self.attitude_quat.numpy())  # input: [qx, qy, qz, qw]
+        self.orient = self.rot_to_euler(self.R)  # output angle order remains on euler_order: x,y,z
         
         # try:
         #     self.linear_velocity = velocity[:, :3]
@@ -86,6 +87,31 @@ class State:
         self.angular_velocity_body = torch.from_numpy(self.R_body.apply(self.angular_velocity.numpy())).to(dtype=torch.float32)
 
         return
+
+    def reset(self):
+        """
+        This method is expected to reset the state variables to its initial conditions.
+        """
+        # The position [x,y,z] in the inertial frame
+        self.position = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+
+        # The attitude (orientation) in the inertial frame
+        self.attitude_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=torch.float32)
+        self.R = Rotation.from_quat(self.attitude_quat.numpy())  # input: [qx, qy, qz, qw]
+        self.orient = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+        
+        # The linear velocity [u,v,w] in the body frame
+        self.linear_velocity_body = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+
+        # The linear velocity [x_dot, y_dot, z_dot] in the inertial frame
+        self.linear_velocity = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+
+        # The angular velocity [wx, wy, wz] in the inertial frame
+        self.angular_velocity = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+
+        # The linear acceleration [ax, ay, az] in the inertial frame
+        self.linear_acceleration = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+
 
     def rot_to_euler(self, R):
         # self.euler_order = 'ZYX' or any other order, e.g., 'XYZ', 'YXZ', etc.

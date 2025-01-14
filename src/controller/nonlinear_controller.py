@@ -167,7 +167,7 @@ class NonlinearController(Backend):
         self.index = 0
         self.traj_time = 0.0
         self.time_ref = 0.0
-        carb.log_warn(f"trajectory is: {self.trajectory}")
+        # carb.log_warn(f"trajectory is: {self.trajectory}")
 
     def input_reference(self):
         """
@@ -239,7 +239,7 @@ class NonlinearController(Backend):
         Z_b_cross_X_c = torch.linalg.cross(Z_b_des, X_c_des)
         Y_b_des = Z_b_cross_X_c / torch.norm(Z_b_cross_X_c)
         # Compute X_b_des
-        X_b_des = torch.cross(Y_b_des, Z_b_des)
+        X_b_des = torch.cross(Y_b_des, Z_b_des, dim=0)
         # Compute the desired rotation R_des = [X_b_des | Y_b_des | Z_b_des]
         R_des = torch.column_stack((X_b_des, Y_b_des, Z_b_des))
         R = torch.tensor(self.R.as_matrix(), dtype=torch.float)
@@ -324,18 +324,11 @@ class NonlinearController(Backend):
         self.input_ref = torch.tensor([0.0 for i in range(self._num_rotors)], dtype=torch.float32)
 
         # The current state of the vehicle expressed in the inertial frame (in ENU)
-        self.p = torch.zeros(3)                          # The vehicle position
-        self.R: Rotation = Rotation.identity()           # The vehicle attitude (stays as Rotation object)
-        self.w = torch.zeros(3)                          # The angular velocity of the vehicle
-        self.v = torch.zeros(3)                          # The linear velocity of the vehicle in the inertial frame
-        self.a = torch.zeros(3)                          # The linear acceleration of the vehicle in the inertial frame
-        self.orient = torch.zeros(3)
-
         self.int = torch.tensor([0.0, 0.0, 0.0])         # The integral of position error
         
+        self.update_state(self.vehicle._state)
         # Set the initial time for starting when using the built-in trajectory (the time is also used in this case
         # as the parametric value)
-        self.total_time = 0.0
         self.index = 0
         # Signal that we will not used a received trajectory
         self.trajectory = None
@@ -345,3 +338,6 @@ class NonlinearController(Backend):
 
         # Lists used for analysing performance statistics
         self.reset_statistics()
+
+        # Reset the trahectory generator
+        self.traj_generator.reset()

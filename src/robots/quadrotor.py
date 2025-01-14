@@ -1,10 +1,11 @@
-# 
+#!/usr/bin/env python
 from typing import Optional
 
 # Isaac sim APIs
 import carb
 import torch
 from omni.isaac.core.utils.nucleus import get_assets_root_path
+
 
 # Extension APIs
 import sys
@@ -70,17 +71,13 @@ class Quadrotor(Vehicle):
             stage_prefix=stage_prefix, 
             usd_path = self._usd_path, 
             init_pos=init_position, 
-            init_orient=init_orientation, 
+            init_orient=init_orientation,  # [x,y,z,w]
             scale=scale,
             sensors=sensors,
             graphical_sensors=graphical_sensors,
             backends=backends
             )
         
-    def add_backends(self, backend):
-        self._backends.append(backend)
-        
-
     def update(self, dt: float):
         """
         Method that computes and applies the forces to the vehicle in simulation. 
@@ -184,7 +181,7 @@ class Quadrotor(Vehicle):
         aloc_matrix = torch.zeros((4, self._thrusters._num_rotors), dtype=torch.float32)
 
         # Define the first line of the matrix (T [N])
-        aloc_matrix[0, :] = torch.tensor(self._thrusters._rotor_constant, dtype=torch.float32)
+        aloc_matrix[0, :] = self._thrusters._rotor_constant.clone().detach().to(dtype=torch.float32)
 
         # Define the second and third lines of the matrix (\tau_x [Nm] and \tau_y [Nm])
         aloc_matrix[1, :] = torch.tensor(
@@ -226,6 +223,31 @@ class Quadrotor(Vehicle):
 
         return ang_vel
 
-if __name__ == "__main__":
-    #
-    pass
+    def reset(self):
+        """
+        Method that should be implemented by the class that inherits the vehicle object.
+        This method is expected to reset the vehicle's state to its initial conditions.
+
+        """
+        # Reset quadrotor's state and propeller
+        self.set_world_pose(position=self.init_pos, orientation=self.init_orient)
+
+        # Reset linear and angular velocities to zero
+        self.set_linear_velocity(torch.zeros(3))
+        self.set_angular_velocity(torch.zeros(3))
+
+        self._state.reset()
+
+        # Reset sensors' state
+        for sensor in self._sensors:
+            sensor.reset()
+
+        # Reset graphical_sensors' state
+        for graphical_sensor in self._graphical_sensors:
+            graphical_sensor.reset()
+
+        # Reset backends' state
+        for backend in self._backends:
+            backend.reset()
+
+

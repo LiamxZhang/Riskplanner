@@ -9,20 +9,28 @@ QIS = QuadrotorIsaacSim()
 
 # setup robot
 from configs.configs import ROBOT_PARAMS
-from nonlinear_controller import NonlinearController
+from controller.nonlinear_controller import NonlinearController
+
+quadrotor_params ={
+    "stage_prefix": "/World/envs/Iris",
+    "name": "Iris",
+    "usd_path": "omniverse://localhost/Library/NVIDIA/Assets/Isaac/4.2/Isaac/Robots/Iris/iris.usd",
+    "init_position": [0.0, 0.0, 0.2],
+    "init_orientation": [0.0, 0.0, 0.0, 1.0],
+    "scale": [1,1,1],
+}
 
 controller = NonlinearController(
-                stage_prefix=ROBOT_PARAMS['stage_prefix'],
+                stage_prefix=quadrotor_params['stage_prefix'],
                 Ki=[0.5, 0.5, 0.5],
                 Kr=[2.0, 2.0, 2.0]
             )
 
-
 from robots.quadrotor import Quadrotor
-quadrotor = Quadrotor(**ROBOT_PARAMS, sensors=[], graphical_sensors=[], backends=[controller])
+quadrotor = Quadrotor(**quadrotor_params, sensors=[], graphical_sensors=[], backends=[controller])
 target = [[0.5, 0, 0.2, 0]]
 
-QIS.start()
+QIS.reset()
 
 while QIS.is_running():
     print("current simulation time: ", QIS.time)

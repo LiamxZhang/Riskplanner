@@ -10,8 +10,17 @@ APP_SETTINGS = {
 # Define the path of the map USD files
 MAP_ASSET = {
     "default_usd_path": "/Isaac/Environments/Simple_Room/simple_room.usd",
-    "usd_path": "omniverse://localhost/Library/NVIDIA/Assets/Isaac/4.2/Isaac/Environments/NYU/NYC_street.usd",
+    "NYC_usd_path": "omniverse://localhost/Library/NVIDIA/Assets/Isaac/4.2/Isaac/Environments/NYU/NYC_street.usd",
+    "ros2_publish": True,
+    "max_length_of_points": int(1e3)
 }
+MASKED_PRIMS={
+    "default_usd_path": ['Looks','Light','Floor','Towel_Room01','GroundPlane'], # 'table'
+    "NYC_usd_path": ['Looks','Meshes','Lighting','Road','Pavement',
+                'GroundPlane','TrafficLight','Bench','Tree','TableChair',
+                'Billboard','Lamp','RoadBarriers','Booth','Umbrella','Camera'],  # 'Buildings', 'Car'
+}
+
 
 # Define the default settings for the simulation environment
 # Default "stage_units_in_meters" is 1.0 m
@@ -35,11 +44,13 @@ ROBOT_PARAMS = {
 
 # Define the parameters for the robot controller and planner
 CONTROL_PARAMS = {
-    "grid_resolution": 2.0,
+    "grid_resolution": 1.0,
     "control_cycle": 0.5,   # valid min 0.06, but effective min 0.5
     "num_rotors": 4,
-    "mass": 1.50,   # Mass in Kg
-    "gravity": 9.81 # The gravity acceleration ms^-2
+    "mass": 1.50,    # Mass in Kg
+    "gravity": 9.81, # The gravity acceleration ms^-2
+    "target_position": [1.5, 0.0, 0.2],
+    "target_radius": 0.1 
 }
 
 # Iris drone risk parameters
@@ -59,9 +70,9 @@ RISK_PARAMS = {
 LIDAR_PARAMS = {
     "type": "Lidar",
     "frequency": 20.0,
-    "range": [0.4, 1000.0],
-    "fov": [90.0, 120.0],   # horizontal_fov, vertical_fov
-    "resolution": [0.5, 0.5],
+    "range": [0.4, 700.0],
+    "fov": [90.0, 120.0],   # horizontal_fov 90, vertical_fov 120
+    "resolution": [10.0, 10.0],
     "rotation_rate": 0.0,
     "orientation": [0.0, 0.0, 0.0],
     "translation": [0.0, 0.0, -0.5],
@@ -70,4 +81,5 @@ LIDAR_PARAMS = {
     "multi_line_mode": True,
     "enable_semantics": True,
     "visualization": False,
+    "ros2_publish": False,
 }

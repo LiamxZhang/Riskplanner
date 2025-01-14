@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # This script setup the isaac sim environment
 #
 import sys
@@ -6,6 +7,7 @@ import time
 import carb
 from threading import Lock
 import torch
+import rclpy
 
 try:
     import trimesh
@@ -30,7 +32,7 @@ current_file_path = Path(__file__).resolve().parent
 sys.path.append(str(current_file_path.parent))
 from utils.obstacle_grid import ObstacleGrid
 from utils.task_util import is_masked
-from configs.configs import APP_SETTINGS, MAP_ASSET, WORLD_SETTINGS, CONTROL_PARAMS
+from configs.configs import APP_SETTINGS, MAP_ASSET, MASKED_PRIMS, WORLD_SETTINGS, CONTROL_PARAMS
 
 class QuadrotorIsaacSim:
     """
@@ -58,7 +60,9 @@ class QuadrotorIsaacSim:
         
         # Create the app
         self.App = SimulationApp(launch_config=APP_SETTINGS)
-        usd_path = MAP_ASSET["usd_path"]
+        # usd_path = MAP_ASSET["NYC_usd_path"]
+        # self.masked_prims = MASKER_PRIMS["NYC_usd_path"]
+        usd_path=None
         self.load_task(usd_path)
         time.sleep(2)
         self.init_config(CONTROL_PARAMS['grid_resolution'],CONTROL_PARAMS['control_cycle'])
@@ -66,6 +70,12 @@ class QuadrotorIsaacSim:
         # Access the world
         from omni.isaac.core.world import World
         self._world = World(**WORLD_SETTINGS)
+
+        # Scan the map & save prims in grids
+        self.start()
+
+        # Activate the ROS2 kernel
+        rclpy.init(args=None)
 
     """
     Properties
@@ -94,8 +104,7 @@ class QuadrotorIsaacSim:
     """
 
     def start(self):
-        self._world.reset()
-        
+        self.reset()
         self.save_all_prims_in_grid() 
         self.init_timer()
 
@@ -105,6 +114,9 @@ class QuadrotorIsaacSim:
 
     def update(self):
         self.App.update()
+
+    def reset(self):
+        self._world.reset()
 
     def is_running(self):
         return self.App.is_running() and not self.App.is_exiting()
@@ -124,6 +136,7 @@ class QuadrotorIsaacSim:
         # Set task directory
         if not usd_path: 
             usd_path = assets_root_path + MAP_ASSET["default_usd_path"]
+            self.masked_prims = MASKED_PRIMS["default_usd_path"]
 
         # Load the stage
         if is_file(usd_path):
@@ -150,11 +163,6 @@ class QuadrotorIsaacSim:
             gr (float): grid resolution. 
             dt (float): time step during each simulation cycle. 
         """
-        # self.masked_prims = ['Looks','Meshes','Lighting','Road','Buildings','Pavement',
-        #                 'GroundPlane','TrafficLight','Bench','Tree','TableChair',
-        #                 'Billboard','Lamp','RoadBarriers','Booth','Umbrella','Camera']
-        
-        self.masked_prims = ['Looks','Light','Floor','Towel_Room01','GroundPlane']
         # for grid map
         self.stage = omni.usd.get_context().get_stage()
         self.length_unit = self.stage.GetMetadata('metersPerUnit')
@@ -334,9 +342,7 @@ if __name__ == "__main__":
     #           "control_cycle": 0.1 
     #           }
     QIS = QuadrotorIsaacSim()
-    
-    QIS.start()
-    
+
     while QIS.is_running():
         # print("current simulation time: ", QIS.time)
         QIS.update()

@@ -11,8 +11,17 @@ QIS = QuadrotorIsaacSim()
 from configs.configs import ROBOT_PARAMS
 from controller.nonlinear_controller import NonlinearController
 
+quadrotor_params ={
+    "stage_prefix": "/World/envs/Iris",
+    "name": "Iris",
+    "usd_path": "omniverse://localhost/Library/NVIDIA/Assets/Isaac/4.2/Isaac/Robots/Iris/iris.usd",
+    "init_position": [-1.5, 0.0, 0.2],
+    "init_orientation": [0.0, 0.0, 0.0, 1.0],
+    "scale": [1,1,1],
+}
+
 controller = NonlinearController(
-                stage_prefix=ROBOT_PARAMS['stage_prefix'],
+                stage_prefix=quadrotor_params['stage_prefix'],
                 Ki=[0.5, 0.5, 0.5],
                 Kr=[2.0, 2.0, 2.0]
             )
@@ -20,20 +29,27 @@ controller = NonlinearController(
 from sensors.lidar import RotatingLidar
 lidar = RotatingLidar()
 
-from robots.quadrotor import Quadrotor
-quadrotor = Quadrotor(**ROBOT_PARAMS, sensors=[], graphical_sensors=[lidar], backends=[controller])
-# Set the vehicle init position as [-1.0, 0.0, 0.2]
-target = [[-0.5, 0, 0.2, 0.0]]
-
-QIS.start()  # get grid map QIS.prim_grid
-
 from map.sense_gridmap import SenseGridMap
 sense_gridmap = SenseGridMap()
+# quadrotor.add_backends(sense_gridmap)
 
-quadrotor.add_backends(sense_gridmap)
+from robots.quadrotor import Quadrotor
+quadrotor = Quadrotor(**quadrotor_params, sensors=[], graphical_sensors=[lidar], backends=[controller, sense_gridmap])
+
+QIS.reset() 
+
+# Set the vehicle init position as [x, y, z, psi]
+target = [[-1.0, 0, 0.2, 0.0]]
+
+count = 0
 
 while QIS.is_running():
-    print("current simulation time: ", QIS.time)
+    count += 1
+    # print("current simulation time: ", QIS.time)
     quadrotor.update_trajectory(target)
     QIS.update() # App.update()
+    if count==100:
+        quadrotor.reset()
+        count = 0
+    
 QIS.stop()

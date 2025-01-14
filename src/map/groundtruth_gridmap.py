@@ -1,4 +1,4 @@
-# 
+#!/usr/bin/env python
 import torch
 
 # Extension APIs
@@ -36,6 +36,7 @@ class GroundTruthGridMap(GridMap):
         for position, prim in self.prim_grid.items(): # position (Tuple), prim (USD.Prim)
             id = self._get_prim_id(prim)
             self._add_to_grid(id, position) # Add a prim to the grid map
+        # print(f"Grid map: {self.all_points.shape}")
         # print(f"Grid map: {self.grid_map}")
         # print(f"Prim categories: {self.prim_categories}")
         # self.visualize_scatter()

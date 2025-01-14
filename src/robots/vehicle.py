@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Numerical computations
 import torch
 
@@ -12,7 +13,6 @@ from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.usd import get_stage_next_free_path
 from omni.isaac.core.robots.robot import Robot
 from omni.isaac.dynamic_control import _dynamic_control
-from omni.isaac.core.articulations import Articulation
 
 # Extension APIs
 import sys
@@ -80,14 +80,16 @@ class Vehicle(Robot):
         # self._prim.GetReferences().AddReference(self._usd_file)
         add_reference_to_stage(self._usd_file, self._stage_prefix)
 
+        self.init_pos = init_pos
+        self.init_orient = [init_orient[3], init_orient[0], init_orient[1], init_orient[2]]
         # Initialize the "Robot" class
         # Note: we need to change the rotation to have qw first, because NVidia
         # does not keep a standard of quaternions inside its own libraries (not good, but okay)
         super().__init__(
             prim_path=self._stage_prefix,
             name=self._vehicle_name,
-            position=init_pos,
-            orientation=[init_orient[3], init_orient[0], init_orient[1], init_orient[2]], # w,x,y,z
+            position=self.init_pos,
+            orientation=self.init_orient, # [w,x,y,z]
             scale=scale,
             articulation_controller=None,
         )
@@ -97,7 +99,7 @@ class Vehicle(Robot):
         # Add this object for the world to track, so that if we clear the world, this object is deleted from memory and
         # as a consequence, from the VehicleManager as well
         self._world.scene.add(self)
-                
+        
         # Variable that will hold the current state of the vehicle
         self._state = State(euler_order='ZYX')
         
@@ -270,6 +272,18 @@ class Vehicle(Robot):
 
         Args:
             dt (float): The time elapsed between the previous and current function calls (s).
+        """
+        pass
+
+    def reset(self):
+        """
+        Method that should be implemented by the class that inherits the vehicle object.
+        This method is expected to reset the vehicle's state to its initial conditions.
+        
+        Example use cases:
+        - Resetting position, orientation, and velocity of the vehicle to default values.
+        - Reinitializing control parameters or any internal state variables.
+
         """
         pass
 

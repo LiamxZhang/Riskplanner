@@ -1,4 +1,4 @@
-# 
+#!/usr/bin/env python
 import torch
 
 # Extension APIs
@@ -30,14 +30,13 @@ class SenseGridMap(GridMap):
             coords = coords,
             dtype = torch.int32
         )
+        self.points_max_length = int(1e2)
         
         # Initialize the to-be-updated variables
         self.reset()
-        self.grid_lifecycle = 100
-
+        self.grid_lifecycle = 100 # for sensed grids
         # print(f"Grid map: {self.grid_map}")
         # print(f"Prim categories: {self.prim_categories}")
-        # self.visualize_scatter()
 
     def start(self):
         """Method that when implemented should handle the begining of the simulation of vehicle
@@ -86,8 +85,11 @@ class SenseGridMap(GridMap):
         # Decrement all values in self.grid_updated by 1, with a minimum of 0
         self.grid_updated = torch.maximum(self.grid_updated - 1, torch.tensor(0, dtype=torch.int32))
         # print("self.grid_updated: ", self.grid_updated)
-        if not torch.all(self.grid_updated==0):
-            self.visualize_scatter()
+
+        # if not torch.all(self.grid_updated==0):
+        #     self.visualize_scatter()
+        # Publish points to ROS2
+        self.pub()
     
     def reset(self):
         """Method that when implemented, should handle the reset of the vehicle simulation to its original state
@@ -98,6 +100,8 @@ class SenseGridMap(GridMap):
         self.grid_updated = torch.zeros(self.gridmap_size, dtype=torch.int32)
         # All prims will be classified as IDs
         self.prim_categories = {}  # Dictionary that mapping prims to IDs
+        # All points collections will be cleared
+        self.all_points = torch.empty((0, 3))
 
 
             
