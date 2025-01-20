@@ -32,7 +32,7 @@ current_file_path = Path(__file__).resolve().parent
 sys.path.append(str(current_file_path.parent))
 from utils.obstacle_grid import ObstacleGrid
 from utils.task_util import is_masked
-from configs.configs import APP_SETTINGS, MAP_ASSET, MASKED_PRIMS, WORLD_SETTINGS, CONTROL_PARAMS
+from configs.configs import APP_SETTINGS, MAP_ASSET, WORLD_SETTINGS, CONTROL_PARAMS
 
 class QuadrotorIsaacSim:
     """
@@ -61,7 +61,7 @@ class QuadrotorIsaacSim:
         # Create the app
         self.App = SimulationApp(launch_config=APP_SETTINGS)
         # usd_path = MAP_ASSET["NYC_usd_path"]
-        # self.masked_prims = MASKER_PRIMS["NYC_usd_path"]
+        # self.masked_prims = MAP_ASSET["masked_prims"]["NYC_usd_path"]
         usd_path=None
         self.load_task(usd_path)
         time.sleep(2)
@@ -136,7 +136,7 @@ class QuadrotorIsaacSim:
         # Set task directory
         if not usd_path: 
             usd_path = assets_root_path + MAP_ASSET["default_usd_path"]
-            self.masked_prims = MASKED_PRIMS["default_usd_path"]
+            self.masked_prims = MAP_ASSET["masked_prims"]["default_usd_path"]
 
         # Load the stage
         if is_file(usd_path):

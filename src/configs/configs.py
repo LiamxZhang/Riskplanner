@@ -11,14 +11,17 @@ APP_SETTINGS = {
 MAP_ASSET = {
     "default_usd_path": "/Isaac/Environments/Simple_Room/simple_room.usd",
     "NYC_usd_path": "omniverse://localhost/Library/NVIDIA/Assets/Isaac/4.2/Isaac/Environments/NYU/NYC_street.usd",
+    "masked_prims": {
+                        "default_usd_path": ['Looks','Light','Floor','Towel_Room01','GroundPlane'], # 'table'
+                        "NYC_usd_path": ['Looks','Meshes','Lighting','Road','Pavement',
+                                    'GroundPlane','TrafficLight','Bench','Tree','TableChair',
+                                    'Billboard','Lamp','RoadBarriers','Booth','Umbrella','Camera'],  # 'Buildings', 'Car'
+                    },
+    # Parameters
     "ros2_publish": True,
-    "max_length_of_points": int(1e3)
-}
-MASKED_PRIMS={
-    "default_usd_path": ['Looks','Light','Floor','Towel_Room01','GroundPlane'], # 'table'
-    "NYC_usd_path": ['Looks','Meshes','Lighting','Road','Pavement',
-                'GroundPlane','TrafficLight','Bench','Tree','TableChair',
-                'Billboard','Lamp','RoadBarriers','Booth','Umbrella','Camera'],  # 'Buildings', 'Car'
+    "max_length_of_pointset": int(1e4),
+    "extend_units": int(5),
+    "max_fill_value": float(5),
 }
 
 
@@ -44,7 +47,7 @@ ROBOT_PARAMS = {
 
 # Define the parameters for the robot controller and planner
 CONTROL_PARAMS = {
-    "grid_resolution": 1.0,
+    "grid_resolution": 0.2,
     "control_cycle": 0.5,   # valid min 0.06, but effective min 0.5
     "num_rotors": 4,
     "mass": 1.50,    # Mass in Kg

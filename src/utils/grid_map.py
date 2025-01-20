@@ -29,7 +29,7 @@ class GridMap(Backend):
         self._compute_map_size(coords)
         self.dtype = dtype
         self.all_points = torch.empty((0, 3))
-        self.points_max_length = int(1e9)
+        self.points_max_length = MAP_ASSET["max_length_of_pointset"]
 
         # Initialize the grid map
         self.grid_map = torch.zeros(self.gridmap_size, dtype=dtype)
@@ -38,7 +38,7 @@ class GridMap(Backend):
             # Create MapPublisher node
             node_name = map_name + "_publish_node"
             topic_name = "/" + map_name + "/points"
-            self.lidar_publisher = PointPublisher(node_name, topic_name)
+            self.map_publisher = PointPublisher(node_name, topic_name)
 
     def _compute_map_size(self, coords):
         """
@@ -49,8 +49,8 @@ class GridMap(Backend):
             self.realmap_bounds = torch.tensor([[0, 0, 0], [10.0, 10.0, 10.0]], dtype=torch.float32)
         else:
             # Real map size
-            min_bounds = coords.min(dim=0).values 
-            max_bounds = coords.max(dim=0).values + self.grid_resolution
+            min_bounds = coords.min(dim=0).values - self.grid_resolution * MAP_ASSET["extend_units"]
+            max_bounds = coords.max(dim=0).values + self.grid_resolution * (MAP_ASSET["extend_units"]+1)
             self.realmap_bounds = torch.stack([min_bounds, max_bounds]) # Shape: [2, 3]
             self.realmap_size = (max_bounds - min_bounds).tolist() # Type: list
             # print(f"Realmap bounds: {self.realmap_bounds}")
@@ -128,7 +128,52 @@ class GridMap(Backend):
         Publish all map points to ROS2 topic
         """
         if MAP_ASSET["ros2_publish"]:
-            self.lidar_publisher.pub(self.all_points)
+            # self.map_publisher.pub(self.all_points)
+            non_zero_grids = torch.nonzero(self.grid_map)
+            self.map_publisher.pub(non_zero_grids.to(dtype=torch.float32))
+
+    def get_local_map(self, center, local_map_shape):
+        """
+        Extract a local map from a 3D tensor, filling out-of-bound regions with a specified value.
+        Parameters:
+            center (torch.Tensor): The center of the local map (x, y, z) in realmap.
+            local_map_shape (tuple): The size of the local map (x_size, y_size, z_size).
+        Returns:
+            local_map (torch.Tensor): The extracted local map with shape equal to `size`.
+        """
+        gridmap_size = torch.tensor(self.gridmap_size, dtype=torch.int32)
+        if gridmap_size is None:
+            gridmap_size = torch.tensor(self.grid_map.shape, dtype=torch.int32)
+
+        # Calculate the start and end indices for the local map in global map
+        center = torch.tensor(self.realmap_to_gridmap_index(center), dtype=torch.int32)
+        size = torch.tensor(local_map_shape, dtype=torch.int32)
+        start = center - size // 2
+        end = center + size // 2 # + 1
+
+        # Create the local map and fill it with the specified value
+        local_map = torch.full(local_map_shape, MAP_ASSET["max_fill_value"], dtype=self.grid_map.dtype)
+
+        # Determine the valid range within the global grid map
+        valid_start = torch.maximum(start, torch.zeros_like(start))
+        valid_end = torch.minimum(end, gridmap_size)
+
+        # Determine the corresponding range within the local map
+        local_start = torch.maximum(-start, torch.zeros_like(start))
+        local_end = size - torch.maximum(end - gridmap_size, torch.zeros_like(end))
+
+        # Copy the valid region from the grid map to the local map
+        local_map[
+            local_start[0]:local_end[0],
+            local_start[1]:local_end[1],
+            local_start[2]:local_end[2],
+        ] = self.grid_map[
+            valid_start[0]:valid_end[0],
+            valid_start[1]:valid_end[1],
+            valid_start[2]:valid_end[2],
+        ]
+
+        return local_map # .unsqueeze(0) 
 
     def visualize_grid(self):
         """

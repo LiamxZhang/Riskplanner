@@ -2,7 +2,7 @@
 #
 #
 import torch
-
+import numpy as np
 
 def to_world(vertex, transform_matrix):
     """
@@ -172,3 +172,27 @@ def traj_tensor(index, traj_list):
     yaw_rate_ref = torch.tensor(traj["yaw_rate"], dtype=torch.float32)   # scalar tensor for yaw rate
     time = torch.tensor(traj["time"], dtype=torch.float32) 
     return p_ref, v_ref, a_ref, j_ref, yaw_ref, yaw_rate_ref, time
+
+
+def spherical_to_cartesian(action, r):
+    """
+    Convert the action space (psi, theta) into spherical coordinates 
+    and then to Cartesian coordinates (x, y, z).
+    Parameters:
+        action (numpy.ndarray): Two dimensions of the action space, psi and theta.
+                                action[0]: ψ, in the range [-1, 1]
+                                action[1]: θ, in the range [-1, 1]
+        r (float): Distance from the point to the origin.
+    Returns:
+        tuple: Cartesian coordinates (x, y, z).
+    """
+    # Extract the two angles from the action space
+    psi = action[0] * np.pi  # Map to [-π, π]
+    theta = (action[1] + 1) * np.pi / 2  # Map to [0, π]
+
+    # Compute Cartesian coordinates
+    x = r * np.cos(psi) * np.sin(theta)
+    y = r * np.sin(psi) * np.sin(theta)
+    z = r * np.cos(theta)
+
+    return x, y, z

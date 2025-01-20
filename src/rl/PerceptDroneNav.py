@@ -7,7 +7,9 @@ current_file_path = Path(__file__).resolve().parent
 sys.path.append(str(current_file_path.parent))
 # Isaac Sim APIs
 from envs.isaacgym_env import QuadrotorIsaacSim
-from configs.configs import ROBOT_PARAMS, CONTROL_PARAMS
+from configs.configs import MAP_ASSET, ROBOT_PARAMS, CONTROL_PARAMS
+from utils.task_util import spherical_to_cartesian
+
 from controller.nonlinear_controller import NonlinearController
 from map.sense_gridmap import SenseGridMap
 from sensors.lidar import RotatingLidar
@@ -17,28 +19,19 @@ from robots.quadrotor import Quadrotor
 import gymnasium as gym
 from gymnasium import spaces
 
-class BaseDroneNav(gym.Env):
+
+class PerceptDroneNav(gym.Env):
     """Base class for "drone navigation" Gym environments."""
     # The isaac sim simulation environment has already been created
     # metadata = {"render_modes": ["human"], "render_fps": 30}
 
     ################################################################################
 
-    def __init__(self,
-                 output_folder='results'
-                 ):
+    def __init__(self, output_folder='results'):
         
         """Initialization of a generic aviary environment.
-
-        Parameters
-        ----------
-        drone_model : DroneModel, optional
-            The desired drone type (detailed in an .urdf file in folder `assets`).
-        num_drones : int, optional
-            The desired number of drones in the aviary.
-
         """
-        super(BaseDroneNav, self).__init__()
+        super(PerceptDroneNav, self).__init__()
 
         # Create the vehicle environment
         controller = NonlinearController(
@@ -56,16 +49,18 @@ class BaseDroneNav(gym.Env):
         QuadrotorIsaacSim().reset() 
 
         # Define action and observation space
-        # The action will be normalized x,y,z,psi coordinates
-        self.action_space = spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32)
+        # The action will be normalized as 2 angles in polar coordinates
+        # and compute the x,y,z,psi coordinates
+        self.action_space = spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32)
 
-        # The observation will be the coordinate of the agent
-        self.observation_space = gym.spaces.Box(
-            low=-np.inf, 
-            high=np.inf, 
-            shape=(6,), 
-            dtype=np.float32
-        )
+        # The observation will be the local grid map and relative state of the agent
+        self.grid_map_dim = (1, 32, 32, 32)  # Dimension: [batch_size, length, width, height]
+        self.state_dim = 6  # Dimension of all state: [x, y, z, vx, vy, vz]
+
+        self.observation_space = spaces.Dict({
+            "gridmap": spaces.Box(low=0, high=MAP_ASSET["max_fill_value"], shape=self.grid_map_dim, dtype=np.float32),
+            "state": spaces.Box(low=-np.inf, high=np.inf, shape=(self.state_dim,), dtype=np.float32)
+        })
 
         # Configurations
         self.target_position = torch.tensor(CONTROL_PARAMS["target_position"], dtype=torch.float32)
@@ -103,8 +98,11 @@ class BaseDroneNav(gym.Env):
         # Reset the quadrotor state
         self.quadrotor.reset()
         # Return observation and info
-        observation = torch.cat((self.target_position-self.quadrotor.state.position, 
-                                 self.quadrotor.state.linear_velocity)).numpy()
+        observation = {
+            "gridmap": self._get_local_gridmap(), 
+            "state": self._get_drone_state() 
+        }
+
         return observation, {}  # empty info dict
     
     ################################################################################
@@ -118,27 +116,38 @@ class BaseDroneNav(gym.Env):
         self.state = self.quadrotor.state
 
         # Adjust action to a trajectory point 
-        scaling_factor_position = 0.2
-        x, y, z = action[:3] * scaling_factor_position  
-        x += self.state.position[0].item()  # Add current x position
-        y += self.state.position[1].item()  # Add current y position
-        z += self.state.position[2].item()  # Add current z position
+        radius = 0.2
+        x, y, z = spherical_to_cartesian(action, radius) # Target waypoint
 
-        psi = action[3] * np.pi/20
+        x0 = self.state.position[0].item()  # Current x position
+        y0 = self.state.position[1].item()  # Current y position
+        z0 = self.state.position[2].item()  # Current z position
+
+        x += x0  # Add current x position
+        y += y0  # Add current y position
+        z += z0  # Add current z position
+
+        # Compute yaw angle using atan2
+        psi = np.arctan2(y - y0, x - x0)
         psi += self.state.angular_velocity[2].item()  # Add current psi angle
 
+        # Constrain psi to [-π, π]
+        psi = (psi + np.pi) % (2 * np.pi) - np.pi
+
         # Apply new trajectory point to quadrotor
-        for i in range(30):
+        for i in range(50):
             self.quadrotor.update_trajectory([[x, y, z, psi]])
             QuadrotorIsaacSim().update() # App.update()
 
         # Termination condition
         terminated = self.is_terminated()
         truncated = self.current_step >= self.max_steps
-
-        observation = torch.cat((self.target_position-self.state.position, 
-                                 self.state.linear_velocity)).numpy()
         
+        observation = {
+            "gridmap": self._get_local_gridmap(), 
+            "state": self._get_drone_state() 
+        }
+
         # Null reward everywhere except when reaching the goal (left of the grid)
         reward = self._computeReward()
 
@@ -212,6 +221,29 @@ class BaseDroneNav(gym.Env):
         """
         raise NotImplementedError
     
+
+    ################################################################################
+    def _get_local_gridmap(self):
+        """Returns the local map from the drone sensors.
+        """
+        self.state = self.quadrotor.state
+        center = self.state.position
+        local_map_shape = self.grid_map_dim[1:]
+
+        local_map = self.sense_gridmap.get_local_map(center, local_map_shape)
+        return local_map
+
+    def _get_drone_state(self):
+        """Returns the relative state of drone between the current and target.
+        """
+        # Update state
+        self.state = self.quadrotor.state
+
+        relative_state = torch.cat((self.target_position-self.state.position, 
+                                 self.state.linear_velocity)).numpy()
+        
+        return relative_state
+    
     ################################################################################
 
     def _computeReward(self):
@@ -235,12 +267,3 @@ class BaseDroneNav(gym.Env):
         else:
             reward = -self.distance - self.alpha * speed - self.beta * self.current_step
             return reward.item()
-        
-
-if __name__ == "__main__":
-    QIS = QuadrotorIsaacSim()
-
-    from stable_baselines3.common.env_checker import check_env
-
-    env = BaseDroneNav()
-    check_env(env, warn=True)

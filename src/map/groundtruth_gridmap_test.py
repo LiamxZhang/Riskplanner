@@ -13,6 +13,16 @@ from groundtruth_gridmap import GroundTruthGridMap
 gt_gridmap = GroundTruthGridMap()
 gt_gridmap.visualize_scatter()
 
+# Get a local map
+# print("real map bounds: ", gt_gridmap.realmap_bounds)
+# print("grid map size: ", gt_gridmap.gridmap_size)
+import torch 
+center = torch.tensor([0,0,0], dtype=torch.float32)
+size = torch.tensor([0.5,0.5,0.5], dtype=torch.float32)
+localmap = gt_gridmap.get_local_map(center, size)
+print("localmap: ", localmap)
+
+
 while QIS.is_running():
     # print("current simulation time: ", QIS.time)
     gt_gridmap.pub()
