@@ -1,0 +1,26 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Single PerceptTrain",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/rl/PerceptDroneNav_train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "python": "/home/lianxin/anaconda3/envs/isaac_gpu/bin/python"
+        },
+        {
+            "name": "Multi Percept Train",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/rl/PerceptDroneNav_multi_train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "python": "/home/lianxin/anaconda3/envs/env_isaacsim/bin/python"
+        }
+    ]
+}

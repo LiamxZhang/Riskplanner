@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import torch
 import matplotlib.pyplot as plt
+import numpy as np
 
 import sys
 from pathlib import Path
@@ -174,6 +175,18 @@ class GridMap(Backend):
         ]
 
         return local_map # .unsqueeze(0) 
+
+    def get_local_map_points(self):
+        """Convert grid map to point cloud coordinates"""
+        occupied_indices = np.argwhere(self.grid_map.cpu().numpy() > 0)
+        points = np.zeros((len(occupied_indices), 3), dtype=np.float32)
+        
+        # Convert grid indices to world coordinates
+        points[:, 0] = occupied_indices[:, 2] * self.grid_resolution + self.realmap_bounds[0, 0]
+        points[:, 1] = occupied_indices[:, 1] * self.grid_resolution + self.realmap_bounds[0, 1]
+        points[:, 2] = occupied_indices[:, 0] * self.grid_resolution + self.realmap_bounds[0, 2]
+        
+        return points
 
     def visualize_grid(self):
         """

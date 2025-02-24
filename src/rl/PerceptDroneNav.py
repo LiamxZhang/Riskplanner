@@ -63,9 +63,17 @@ class PerceptDroneNav(gym.Env):
         })
 
         # Configurations
-        self.target_position = torch.tensor(CONTROL_PARAMS["target_position"], dtype=torch.float32)
+        self.target_position = (torch.tensor(CONTROL_PARAMS["target_position"], dtype=torch.float32)
+                                - torch.tensor(ROBOT_PARAMS["init_position"], dtype=torch.float32))
+        # param里定义的targetposition是相对于世界坐标系原点的
+        # 但是self.quadrotor.state好像是相对于init_position原点的
+        # 这个类似于airsim
         self.max_steps = 1e4
         self.current_step = 0
+
+        self.distance = None
+        self.last_distance = None
+        self.is_flipover = False
 
 
     ################################################################################
@@ -119,6 +127,11 @@ class PerceptDroneNav(gym.Env):
         radius = 0.2
         x, y, z = spherical_to_cartesian(action, radius) # Target waypoint
 
+        relative_position = self.target_position - self.state.position
+        x = relative_position[0].item()
+        y = relative_position[1].item()
+        z = relative_position[2].item()
+
         x0 = self.state.position[0].item()  # Current x position
         y0 = self.state.position[1].item()  # Current y position
         z0 = self.state.position[2].item()  # Current z position
@@ -171,9 +184,9 @@ class PerceptDroneNav(gym.Env):
         offset = 4.0
         min_bounds = self.sense_gridmap.realmap_bounds[0] - offset
         max_bounds = self.sense_gridmap.realmap_bounds[1] + offset
-
         self.is_out_of_bounds = torch.any(self.state.position  < min_bounds) or torch.any(self.state.position  > max_bounds)
         self.distance = torch.norm(self.state.position  - self.target_position)
+        self.is_flipover = False
 
         # Judge whether the drone has reached the boundary
         if self.is_out_of_bounds:
@@ -189,7 +202,8 @@ class PerceptDroneNav(gym.Env):
         angle_threshold = torch.tensor(np.pi / 2, dtype=torch.float32)
         roll, pitch, _ = self.state.orient
         if torch.abs(roll) > angle_threshold or torch.abs(pitch) > angle_threshold:
-            print(f"Drone flips over with roll: {roll} and pitch: {pitch}")
+            self.is_flipover = True
+            # print(f"Drone flips over with roll: {roll} and pitch: {pitch}")
             return True
 
         return False
@@ -253,8 +267,9 @@ class PerceptDroneNav(gym.Env):
 
         """
         
-        self.success_reward = 100.0
-        self.boundary_penalty = -50.0
+        self.success_reward = 10.0
+        self.boundary_penalty = -20.0
+        self.flipover_penalty = -20.0
         self.alpha = 0.1
         self.beta = 0.01
 
@@ -263,7 +278,98 @@ class PerceptDroneNav(gym.Env):
         if self.distance < CONTROL_PARAMS["target_radius"]:
             return self.success_reward
         elif self.is_out_of_bounds:
-            return -self.boundary_penalty
+            return self.boundary_penalty
+        elif self.is_flipover:
+            return self.flipover_penalty
         else:
-            reward = -self.distance - self.alpha * speed - self.beta * self.current_step
+            # reward = -self.distance - self.alpha * speed - self.beta * self.current_step
+            if self.last_distance is not None:
+                if self.last_distance > self.distance: # 靠近goal
+                    reward = 2*(self.last_distance - self.distance)
+                else: # 离的更远带来的惩罚更大
+                    reward = -4*(self.distance - self.last_distance)
+                self.last_distance = self.distance
+            else:
+                self.last_distance = self.distance
+                reward = torch.tensor(0.0)
             return reward.item()
+
+# 在原有PerceptDroneNav类之后添加新的子类
+class PerceptDroneNavSplitStep(PerceptDroneNav):
+    """继承自PerceptDroneNav的新类，拆分step函数"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.current_target = None
+
+    def step1(self, action):
+        """执行物理模拟前的准备工作"""
+        # 更新步数计数
+        self.current_step += 1
+        self.state = self.quadrotor.state
+
+        # 将动作转换为轨迹点（原step函数前半部分）
+        radius = 0.2
+        x, y, z = spherical_to_cartesian(action, radius)
+        x0 = self.state.position[0].item()
+        y0 = self.state.position[1].item()
+        z0 = self.state.position[2].item()
+        x += x0
+        y += y0
+        z += z0
+        psi = np.arctan2(y - y0, x - x0)
+        psi += self.state.angular_velocity[2].item()
+        psi = (psi + np.pi) % (2 * np.pi) - np.pi
+
+        # 更新当前目标, 用于step()
+        self.current_target = [x, y, z, psi]
+        self.quadrotor.update_trajectory([self.current_target])
+        # for _ in range(50):
+        #     self.quadrotor.update_trajectory([self.current_target])
+        #     QuadrotorIsaacSim().update()
+
+    def step(self, action):
+        """执行物理模拟和后续处理（原step函数后半部分）"""
+        # 执行物理模拟（原循环中的App.update()部分）
+        # TODO: 能不能不要循环update_trajectory(),
+        # 既然每次给他的都一样，那没必要循环50次；
+        # 在step1()中更新这个trajectory，然后就可以将QuadrotorIsaacSim().update()就可以在外面vec_env中做了
+
+            # QuadrotorIsaacSim().update()
+
+        # 终止条件判断和奖励计算（原step函数后半部分）
+        terminated = self.is_terminated()
+        truncated = self.current_step >= self.max_steps
+        
+        observation = {
+            "gridmap": self._get_local_gridmap(), 
+            "state": self._get_drone_state() 
+        }
+
+        reward = self._computeReward()
+        info = {}
+
+        return observation, reward, terminated, truncated, info
+
+
+# 在PerceptDroneNav类之后添加
+class DiscretePerceptDroneNav(PerceptDroneNav):
+    """离散动作空间版本，继承原有环境"""
+    
+    def __init__(self, n_psi_bins=16, n_theta_bins=5, **kwargs):
+        super().__init__(**kwargs)
+        
+        # 定义离散动作空间（ψ分n_psi_bins档，θ分n_theta_bins档）
+        self.action_space = spaces.MultiDiscrete([n_psi_bins, n_theta_bins])
+        self._n_psi = n_psi_bins
+        self._n_theta = n_theta_bins
+        
+    def _discrete_to_continuous(self, action):
+        """将离散动作转换为原环境的连续值"""
+        psi = (action[0] / (self._n_psi - 1)) * 2 - 1  # [-1, 1]
+        theta = (action[1] / (self._n_theta - 1)) * 2 - 1  # [-1, 1]
+        return np.array([psi, theta], dtype=np.float32)
+    
+    def step(self, action):
+        # 转换动作后调用父类逻辑
+        continuous_action = self._discrete_to_continuous(action)
+        return super().step(continuous_action)

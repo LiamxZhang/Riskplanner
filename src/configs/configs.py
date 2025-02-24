@@ -40,7 +40,7 @@ ROBOT_PARAMS = {
     "name": "Iris",
     # "usd_path": "/Isaac/Robots/Crazyflie/cf2x.usd", # Under the folder of get_assets_root_path()
     "usd_path": "omniverse://localhost/Library/NVIDIA/Assets/Isaac/4.2/Isaac/Robots/Iris/iris.usd",
-    "init_position": [-1.0, 0.0, 0.2],
+    "init_position": [-1.0, 0.0, 1.0],
     "init_orientation": [0.0, 0.0, 0.0, 1.0],
     "scale": [1,1,1],
 }
@@ -52,7 +52,7 @@ CONTROL_PARAMS = {
     "num_rotors": 4,
     "mass": 1.50,    # Mass in Kg
     "gravity": 9.81, # The gravity acceleration ms^-2
-    "target_position": [1.5, 0.0, 0.2],
+    "target_position": [1.5, 0.0, 1.0],
     "target_radius": 0.1 
 }
 

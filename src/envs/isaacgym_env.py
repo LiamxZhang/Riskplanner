@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # This script setup the isaac sim environment
 #
 import sys
