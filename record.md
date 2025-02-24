@@ -36,7 +36,7 @@ isaac_dummy_vec_env.py是仿照dummy_vec_env写的串行运行多个环境的方
 
 测试了一下，感觉是planner生成的轨迹不太好，假如target point是[2, 0, 0]处一个点，planner生成的轨迹是先加速到7.5，然后再目标点处减速到0的那种轨迹，然后飞机要在1m内加速到7.5, 加速度太大，就翻了
 
-不行就设计成端到端的，直接让RL生成推力算了
+不行就设计成端到端的，直接让RL生成推力算了；或者既然输入的状态空间包含速度，那么让RL输出的动作空间也输出一个速度算了
 
 ## **另外**,有一个重要的坐标系问题
 
@@ -77,7 +77,7 @@ pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https
 
 # 结论
 
-我觉得可以采用串行的多环境运行，首先这样线程稳定，比单环境运行效果快的多;只是需要修改gym环境中update_trajectory和QuadrotorIsaacSim().update()分开之后的逻辑
+我觉得可以采用串行的多环境运行，首先这样线程稳定，比单环境运行效果快的多;只是需要修改gym环境中update_trajectory和QuadrotorIsaacSim().update()分开之后的逻辑，需要修改update_trajectory()函数
 
 我修改了reward之后效果依然不好，然后检查了代码，影响训练结果的应该有两个主要问题
 
@@ -86,3 +86,9 @@ pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https
 第二是observation中的local grid map不知道对不对， 为什么没有感知到墙面和地面
 
 torch是个小问题，只影响训练速度，并不影响训练结果
+
+另外推荐使用cursor来代替vscode写代码，我跟mingsheng已经用了好几天了，非常好用
+
+https://www.bilibili.com/video/BV1yorUYWEGD?spm_id_from=333.788.videopod.sections&vd_source=b69ac0d2e7f2fe4ba35352ee9d07871b&p=4
+
+可以用composer模式，跟它说帮我修改RL的动作空间，增加输出三维速度；然后他就可以修改，很方面；强于GPT的点是他可以看到所有的代码，能够注意到跨文件的代码上下文
