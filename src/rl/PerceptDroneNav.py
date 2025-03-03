@@ -45,6 +45,7 @@ class PerceptDroneNav(gym.Env):
         self.quadrotor = Quadrotor(**ROBOT_PARAMS, sensors=[], 
                                    graphical_sensors=[lidar], 
                                    backends=[controller,self.sense_gridmap])
+        self.init_position = torch.tensor(ROBOT_PARAMS['init_position'], dtype=torch.float32)
 
         QuadrotorIsaacSim().reset() 
 
@@ -55,7 +56,8 @@ class PerceptDroneNav(gym.Env):
 
         # The observation will be the local grid map and relative state of the agent
         self.grid_map_dim = (1, 32, 32, 32)  # Dimension: [batch_size, length, width, height]
-        self.state_dim = 6  # Dimension of all state: [x, y, z, vx, vy, vz]
+        # self.state_dim = 6  # Dimension of all state: [x, y, z, vx, vy, vz]
+        self.state_dim = 9  # Dimension of all state: [x, y, z,gx-x, gy-y, gz-z, vx, vy, vz]
 
         self.observation_space = spaces.Dict({
             "gridmap": spaces.Box(low=0, high=MAP_ASSET["max_fill_value"], shape=self.grid_map_dim, dtype=np.float32),
@@ -63,17 +65,18 @@ class PerceptDroneNav(gym.Env):
         })
 
         # Configurations
-        self.target_position = (torch.tensor(CONTROL_PARAMS["target_position"], dtype=torch.float32)
-                                - torch.tensor(ROBOT_PARAMS["init_position"], dtype=torch.float32))
-        # param里定义的targetposition是相对于世界坐标系原点的
-        # 但是self.quadrotor.state好像是相对于init_position原点的
-        # 这个类似于airsim
+        self.target_position = torch.tensor(CONTROL_PARAMS["target_position"], dtype=torch.float32)
+
         self.max_steps = 1e4
         self.current_step = 0
 
         self.distance = None
         self.last_distance = None
+        self.level_distance = None
+        self.last_level_distance = None
+        self.last_position = None
         self.is_flipover = False
+        self.initial_distance = None
 
 
     ################################################################################
@@ -105,7 +108,13 @@ class PerceptDroneNav(gym.Env):
         super().reset(seed=seed, options=options)
         # Reset the quadrotor state
         self.quadrotor.reset()
+        # 此时飞机到底在哪里？QuadrotorIsaacSim().update()
         # Return observation and info
+        self.state = self.quadrotor.state
+        self.last_distance = torch.norm(self.state.position  - self.target_position)
+        self.last_level_distance = torch.norm(self.state.position[:2]  - self.target_position[:2])
+        self.initial_distance = torch.norm(self.init_position - self.target_position)
+
         observation = {
             "gridmap": self._get_local_gridmap(), 
             "state": self._get_drone_state() 
@@ -123,14 +132,21 @@ class PerceptDroneNav(gym.Env):
         # Update state
         self.state = self.quadrotor.state
 
+        self.last_distance = torch.norm(self.state.position  - self.target_position)
+        self.last_level_distance = torch.norm(self.state.position[:2]  - self.target_position[:2])
+
         # Adjust action to a trajectory point 
         radius = 0.2
         x, y, z = spherical_to_cartesian(action, radius) # Target waypoint
 
         relative_position = self.target_position - self.state.position
-        x = relative_position[0].item()
-        y = relative_position[1].item()
-        z = relative_position[2].item()
+        distance = torch.norm(relative_position)
+        if distance > 0.001:
+            relative_position = relative_position * radius / distance
+
+        x = relative_position[0]
+        y = relative_position[1]
+        z = relative_position[2]
 
         x0 = self.state.position[0].item()  # Current x position
         y0 = self.state.position[1].item()  # Current y position
@@ -147,12 +163,15 @@ class PerceptDroneNav(gym.Env):
         # Constrain psi to [-π, π]
         psi = (psi + np.pi) % (2 * np.pi) - np.pi
 
+        psi = 0
+
         # Apply new trajectory point to quadrotor
-        for i in range(50):
+        for i in range(30):
             self.quadrotor.update_trajectory([[x, y, z, psi]])
             QuadrotorIsaacSim().update() # App.update()
 
         # Termination condition
+        self.state = self.quadrotor.state
         terminated = self.is_terminated()
         truncated = self.current_step >= self.max_steps
         
@@ -181,12 +200,18 @@ class PerceptDroneNav(gym.Env):
     def is_terminated(self):
         """Terminates the environment.
         """
-        offset = 4.0
-        min_bounds = self.sense_gridmap.realmap_bounds[0] - offset
-        max_bounds = self.sense_gridmap.realmap_bounds[1] + offset
+        # offset = 4.0
+        # min_bounds = self.sense_gridmap.realmap_bounds[0] - offset
+        # max_bounds = self.sense_gridmap.realmap_bounds[1] + offset
+        # # 上面这种方式会让无人机卡在墙角出不来
+        offset = torch.tensor([0.10,0.10,0.15], dtype=torch.float32)
+        min_bounds = self.sense_gridmap.realmap_bounds[0] + offset
+        max_bounds = self.sense_gridmap.realmap_bounds[1] - offset
         self.is_out_of_bounds = torch.any(self.state.position  < min_bounds) or torch.any(self.state.position  > max_bounds)
         self.distance = torch.norm(self.state.position  - self.target_position)
         self.is_flipover = False
+
+
 
         # Judge whether the drone has reached the boundary
         if self.is_out_of_bounds:
@@ -253,9 +278,12 @@ class PerceptDroneNav(gym.Env):
         # Update state
         self.state = self.quadrotor.state
 
-        relative_state = torch.cat((self.target_position-self.state.position, 
+        # relative_state = torch.cat((self.target_position-self.state.position, 
+        #                          self.state.linear_velocity)).numpy()
+
+        relative_state = torch.cat((self.state.position,self.target_position-self.state.position, 
                                  self.state.linear_velocity)).numpy()
-        
+                                   
         return relative_state
     
     ################################################################################
@@ -267,7 +295,7 @@ class PerceptDroneNav(gym.Env):
 
         """
         
-        self.success_reward = 10.0
+        self.success_reward = 40.0
         self.boundary_penalty = -20.0
         self.flipover_penalty = -20.0
         self.alpha = 0.1
@@ -275,23 +303,44 @@ class PerceptDroneNav(gym.Env):
 
         speed = torch.norm(self.state.linear_velocity)
 
+        self.level_distance = torch.norm(self.state.position[:2]  - self.target_position[:2])
+        target_height_distance = torch.abs(self.state.position[2] - self.target_position[2])
+        init_height_distance = torch.abs(self.state.position[2] - self.init_position[2])
+
+        min_height_distance = torch.min(target_height_distance, init_height_distance)
+
+        progress = 1.0 - (self.distance / self.initial_distance)
+
+        progress = torch.clamp(progress, min=0.0, max=1.0)
+        progress_reward = self.success_reward * progress * 0.8
+
         if self.distance < CONTROL_PARAMS["target_radius"]:
             return self.success_reward
         elif self.is_out_of_bounds:
-            return self.boundary_penalty
+            return self.boundary_penalty + progress_reward.item()
         elif self.is_flipover:
-            return self.flipover_penalty
+            return self.flipover_penalty + progress_reward.item()
+        # elif self.current_step > self.max_steps:
+        #     return progress.item()
         else:
             # reward = -self.distance - self.alpha * speed - self.beta * self.current_step
-            if self.last_distance is not None:
-                if self.last_distance > self.distance: # 靠近goal
-                    reward = 2*(self.last_distance - self.distance)
+            reward = torch.tensor(-0.5) # 每一步的时间惩罚
+            # 水平距离
+            if self.last_level_distance is not None:
+                if self.last_level_distance > self.level_distance: # 靠近goal
+                    reward = 20*(self.last_level_distance - self.level_distance)
                 else: # 离的更远带来的惩罚更大
-                    reward = -4*(self.distance - self.last_distance)
-                self.last_distance = self.distance
+                    reward = -25*(self.level_distance - self.last_level_distance)
+                self.last_level_distance = self.level_distance
             else:
-                self.last_distance = self.distance
-                reward = torch.tensor(0.0)
+                self.last_level_distance = self.level_distance
+                reward = reward + torch.tensor(0.0)
+            
+            # 高度部分
+
+            reward = reward - 1*min_height_distance
+            
+            # height1 = self.state.position[2].item() - 
             return reward.item()
 
 # 在原有PerceptDroneNav类之后添加新的子类
@@ -308,7 +357,7 @@ class PerceptDroneNavSplitStep(PerceptDroneNav):
         self.state = self.quadrotor.state
 
         # 将动作转换为轨迹点（原step函数前半部分）
-        radius = 0.2
+        radius = 0.5
         x, y, z = spherical_to_cartesian(action, radius)
         x0 = self.state.position[0].item()
         y0 = self.state.position[1].item()

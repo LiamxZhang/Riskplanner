@@ -4,7 +4,7 @@ import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 class MultiModalFeatureExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space, cnn_output_dim=256, mlp_output_dim=64):
+    def __init__(self, observation_space, cnn_output_dim=64, mlp_output_dim=64):
         # Initialize parent class
         super().__init__(observation_space, cnn_output_dim + mlp_output_dim)
 
@@ -12,6 +12,17 @@ class MultiModalFeatureExtractor(BaseFeaturesExtractor):
         length, width, height = self.calculate_conv3d_output_shape(observation_space.spaces["gridmap"].shape[1:], kernel_size=3, stride=2, padding=1)
         length, width, height = self.calculate_conv3d_output_shape((length, width, height), kernel_size=3, stride=2, padding=1)
         flattened_size = 64 * length * width * height  # 64 is the out_channels of the last Conv3d layer
+        
+        def init_weights(m):
+            if isinstance(m, nn.Conv3d):
+                # Kaiming/He initialization for Conv3d layers
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.01)
+            elif isinstance(m, nn.Linear):
+                # Xavier/Glorot initialization for Linear layers
+                nn.init.xavier_normal_(m.weight)
+                nn.init.constant_(m.bias, 0.01)
 
         # Exract the feature of grid_map via 3D CNN
         self.cnn = nn.Sequential(
@@ -28,14 +39,22 @@ class MultiModalFeatureExtractor(BaseFeaturesExtractor):
             # [batch_size, cnn_output_dim]
             nn.ReLU()
         )
+        # Apply weight initialization
+        self.cnn.apply(init_weights)
+
+        # 自动获取无人机状态维度
+        state_shape = observation_space.spaces["state"].shape
+        state_dim = state_shape[0] if len(state_shape) > 0 else 1  # 处理标量情形
 
         # MLP to process the drone state
         self.mlp = nn.Sequential(
-            nn.Linear(6, 128),
+            nn.Linear(state_dim, 128),  # 动态输入维度
             nn.ReLU(),
             nn.Linear(128, mlp_output_dim),
             nn.ReLU()
         )
+        # Apply weight initialization
+        self.mlp.apply(init_weights)
 
     def forward(self, observations):
         # Unsqueeze the grid_map [batch_size, 1, length, width, height]

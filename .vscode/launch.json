@@ -11,7 +11,7 @@
             "program": "${workspaceFolder}/src/rl/PerceptDroneNav_train.py",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "python": "/home/lianxin/anaconda3/envs/isaac_gpu/bin/python"
+            "python": "/home/lianxin/anaconda3/envs/env_isaacsim/bin/python"
         },
         {
             "name": "Multi Percept Train",

@@ -236,7 +236,7 @@ class Quadrotor(Vehicle):
         self.set_linear_velocity(torch.zeros(3))
         self.set_angular_velocity(torch.zeros(3))
 
-        self._state.reset()
+        self._state.reset(init_position=self.init_pos, init_orientation=self.init_orient)
 
         # Reset sensors' state
         for sensor in self._sensors:

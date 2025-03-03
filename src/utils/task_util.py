@@ -194,5 +194,4 @@ def spherical_to_cartesian(action, r):
     x = r * np.cos(psi) * np.sin(theta)
     y = r * np.sin(psi) * np.sin(theta)
     z = r * np.cos(theta)
-
     return x, y, z

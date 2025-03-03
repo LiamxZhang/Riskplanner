@@ -88,20 +88,18 @@ class State:
 
         return
 
-    def reset(self):
+    def reset(self, init_position=[0.0, 0.0, 0.0], init_orientation=[0.0, 0.0, 0.0, 1.0]):
         """
         This method is expected to reset the state variables to its initial conditions.
         """
         # The position [x,y,z] in the inertial frame
-        self.position = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+        self.position = torch.tensor(init_position, dtype=torch.float32)
 
         # The attitude (orientation) in the inertial frame
-        self.attitude_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=torch.float32)
+        self.attitude_quat = torch.tensor(init_orientation, dtype=torch.float32)    
         self.R = Rotation.from_quat(self.attitude_quat.numpy())  # input: [qx, qy, qz, qw]
-        self.orient = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
-        
-        # The linear velocity [u,v,w] in the body frame
-        self.linear_velocity_body = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+        # self.orient = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+        self.orient = self.rot_to_euler(self.R)
 
         # The linear velocity [x_dot, y_dot, z_dot] in the inertial frame
         self.linear_velocity = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
@@ -111,6 +109,14 @@ class State:
 
         # The linear acceleration [ax, ay, az] in the inertial frame
         self.linear_acceleration = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+        
+        # # update state in body frame
+        self.R_body = self.R.inv()
+        self.orient_body = self.rot_to_euler(self.R_body)
+
+        self.linear_velocity_body = torch.from_numpy(self.R_body.apply(self.linear_velocity.numpy())).to(dtype=torch.float32)
+        self.angular_velocity_body = torch.from_numpy(self.R_body.apply(self.angular_velocity.numpy())).to(dtype=torch.float32)
+
 
 
     def rot_to_euler(self, R):

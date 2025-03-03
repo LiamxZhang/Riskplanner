@@ -30,27 +30,19 @@ isaac_dummy_vec_env.py是仿照dummy_vec_env写的串行运行多个环境的方
 
 
 # 飞控的问题
-第二是通过debug,检查了每次QuadrotorIsaacSim().update()前后的情况，如果这个循环50次，足够飞机翻好几次了;尤其是如果两个step()之间的action相差比较大的话，会给飞机姿态带来巨大的变化;尝试了循环10次，飞机的行为稳定了许多;
 
-而且感觉planner和飞控配合的不是很好，在step()函数中忽略RL输出的waypoint，把waypoint强行设置在targetpoint,依然飞不过去
+感觉现在这样飞有点慢
 
-测试了一下，感觉是planner生成的轨迹不太好，假如target point是[2, 0, 0]处一个点，planner生成的轨迹是先加速到7.5，然后再目标点处减速到0的那种轨迹，然后飞机要在1m内加速到7.5, 加速度太大，就翻了
-
-不行就设计成端到端的，直接让RL生成推力算了；或者既然输入的状态空间包含速度，那么让RL输出的动作空间也输出一个速度算了
-
-## **另外**,有一个重要的坐标系问题
-
-PARAMS中定义的target_position是和init_position一样定义在世界系下的，但是运行起来之后，从self.quadrotor.state中获取的飞机当前位置是以init_position为原点的;表现形式就是，输入target_position为[1.0, 0.0, 0.0], init_position为[-1, 0.0, 0.0]; 进入程序后一开始获取到的quadrotor.state中的位置是[0.0, 0.0, 0.0], 计算出的target_position的相对坐标是[1,0,0],但是实际上应该是[2,0,0]
-
-这个我改掉了，在init函数中定义
-self.target_position = torch.tensor(CONTROL_PARAMS["target_position"] - ROBOT_PARAMS["init_position"], dtype=torch.float32)
-
-但是就算给飞机指示targetposition,planner+飞控依然飞不到那里
 
 # 奖励部分
-而且没有碰撞惩罚，只有一个飞机翻过来的惩罚;飞机甚至可以触地平移;感觉不太合理，飞机碰撞桌子之后，只有翻了才会有惩罚，这种间接的reward,飞机不太容易学会避开桌子;而且flip over都没有设置惩罚
 
-计算奖励那里，is_out_of_bounds的penalyt定义的是-50, 结果return了-self.boundary_penalty, 不就是返回的是正数了吗
+我改了奖励和惩罚，现在训练可以开始往前走了，但是目前还是到不了终点。总是out of bounds;因为我修改了这个边界，如果边界太大，飞机会卡在墙角停不下来
+
+而且现在触地和接触桌子都没有惩罚，尤其接触桌子
+
+truncated = self.current_step >= self.max_steps这句话不知道干什么用的，确切的说不知道trucated这个状态对于sb3的ppo来说有什么意义
+
+我本来想修改一下，改为超过max_steps终止terminated;但是max_steps现在设置为1e4有点大，我改小之后，训练几轮会报错;说local map维度有问题
 
 # 程序跑在cpu上
 代码似乎运行在CPU下，好像是因为torch的版本有点乱， GPT建议重新装
@@ -79,11 +71,6 @@ pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https
 
 我觉得可以采用串行的多环境运行，首先这样线程稳定，比单环境运行效果快的多;只是需要修改gym环境中update_trajectory和QuadrotorIsaacSim().update()分开之后的逻辑，需要修改update_trajectory()函数
 
-我修改了reward之后效果依然不好，然后检查了代码，影响训练结果的应该有两个主要问题
-
-一个是planner+飞控的结果并不稳定，即使输入ground truth的target point, 也无法稳定到达;可以在step中加一个断点发现，每次step运行的飞机状态都不太稳定
-
-第二是observation中的local grid map不知道对不对， 为什么没有感知到墙面和地面
 
 torch是个小问题，只影响训练速度，并不影响训练结果
 
